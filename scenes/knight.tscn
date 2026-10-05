@@ -4,7 +4,7 @@
 [ext_resource type="Script" path="res://scripts/knight.gd" id="2_knight"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_feet"]
-size = Vector2(14, 8)
+size = Vector2(18, 6)
 
 [node name="Knight" type="CharacterBody2D"]
 texture_filter = 1
@@ -12,10 +12,19 @@ motion_mode = 1
 script = ExtResource("2_knight")
 
 [node name="KnightSprite" type="Sprite2D" parent="."]
-position = Vector2(0, -12)
+position = Vector2(-5, -16)
 scale = Vector2(0.25, 0.25)
 texture = ExtResource("1_idle")
 vframes = 4
 
 [node name="Feet" type="CollisionShape2D" parent="."]
+position = Vector2(0, -3)
 shape = SubResource("RectangleShape2D_feet")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+enabled = true
+zoom = Vector2(1, 1)
+process_callback = 0
+position_smoothing_enabled = false
+drag_horizontal_enabled = false
+drag_vertical_enabled = false
