@@ -18,12 +18,16 @@ const ACTIONS := [
 ## Not rebindable: Esc always opens the menu.
 const MENU_KEY := KEY_ESCAPE
 
-## The three things the headset can detect. Each arrives as a UDP word or a
+## The things a headset detector can report. Each arrives as a UDP word or a
 ## key press (whichever the detector can send) and triggers one brain action.
+## Head shake and nod come from the Unicorn's gyroscope (Neu_to_text_new5.py
+## sends BLINK, SHAKE and NOD).
 const SIGNALS := [
 	{"signal": "blink", "label": "Blink", "words": "BLINK", "key": KEY_B, "action": "turn"},
 	{"signal": "mouth", "label": "Close mouth", "words": "MOUTH, MOUTH_CLOSED, JAW", "key": KEY_M, "action": "go"},
 	{"signal": "eyes", "label": "Eyes closed", "words": "EYES, EYES_CLOSED", "key": KEY_E, "action": "run"},
+	{"signal": "shake", "label": "Head shake", "words": "SHAKE, HEAD_SHAKE", "key": KEY_N, "action": "go"},
+	{"signal": "nod", "label": "Nod", "words": "NOD", "key": KEY_Y, "action": "swing"},
 ]
 const BRAIN_ACTIONS := [
 	["turn", "Turn (clockwise)"],
@@ -156,7 +160,7 @@ func first_key(action: String) -> String:
 	var list: Array = keys.get(action, [])
 	return key_name(list[0]) if not list.is_empty() else "?"
 
-## Which signal a received word means ("blink", "mouth", "eyes"), or "".
+## Which signal a received word means ("blink", "mouth", "nod"...), or "".
 func signal_for_word(word: String) -> String:
 	word = word.strip_edges().to_upper()
 	for row in SIGNALS:
@@ -191,12 +195,14 @@ func brain_hint() -> String:
 			parts.append("%s  %s" % [row.label, action_label(action).to_lower()])
 	return "     ".join(parts)
 
-## The signal that triggers an action, e.g. "Blink" for "turn", or "".
+## The signal(s) that trigger an action, e.g. "Blink" for "turn" or
+## "Close mouth or Head shake" for "go", or "".
 func signal_doing(action: String) -> String:
+	var labels: Array[String] = []
 	for row in SIGNALS:
 		if signal_actions[row.signal] == action:
-			return row.label
-	return ""
+			labels.append(row.label)
+	return " or ".join(labels)
 
 static func split_words(text: String) -> Array:
 	return Array(text.to_upper().split(",", false)).map(func(item: String) -> String: return item.strip_edges())

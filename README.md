@@ -69,31 +69,43 @@ and Quit. Esc in game returns to it. Settings has three tabs:
 - **Brain interface:** play with a g.tec Unicorn headset (see below).
 - **Audio & display:** music volume and fullscreen.
 
-## Brain interface (three signals)
+## Brain interface
 
-The game can be played hands-free with a headset that detects three things:
-a **blink**, a **closed mouth** and **closed eyes**. The `BrainLink` autoload
+The game can be played hands-free with a headset that detects a **blink**, a
+**closed mouth**, **closed eyes**, a **head shake** or a **nod** (use the
+ones your detector reports). The `BrainLink` autoload
 (`scripts/brain_link.gd`) turns them into steering:
 
-| Signal | Default action |
-| --- | --- |
-| Close mouth | Go / stop: walk along the heading, or stop |
-| Blink | Turn the heading clockwise (up, right, down, left) |
-| Eyes closed | Run on / off |
+| Signal | Word / key | Default action |
+| --- | --- | --- |
+| Close mouth | MOUTH / M | Go / stop: walk along the heading, or stop |
+| Blink | BLINK / B | Turn the heading clockwise (up, right, down, left) |
+| Eyes closed | EYES / E | Run on / off |
+| Head shake | SHAKE / N | Go / stop |
+| Nod | NOD / Y | Swing sword |
+
+With the g.tec Unicorn, `Neu_to_text_new5.py` (the team's detector) reads
+blinks from Fz and head shakes / nods from the gyroscope and sends BLINK,
+SHAKE and NOD to `127.0.0.1:1000`. Start the game, tick **Use the brain
+interface**, then run `python Neu_to_text_new5.py` (add `--debug` to see the
+measured values while tuning thresholds, `--host`/`--port` for another
+computer).
 
 An arrow at the player's feet shows the heading: faint while standing,
 bright while walking, doubled while running. Each signal can be remapped in
-Settings to Turn, Go / stop, Run, Back to door or Nothing. In menus a blink
-moves to the next button and a closed mouth presses it, so the whole game,
-menus included, works without a keyboard.
+Settings to Turn, Go / stop, Run, Back to door, Swing sword, Drink potion or
+Nothing. In menus a blink moves to the next button and a closed mouth, head
+shake or nod presses it, so the whole game, menus included, works without a
+keyboard.
 
 The detector can deliver signals in either of two ways, whichever is easier:
 
-- **UDP:** send the word (BLINK, MOUTH or EYES by default, editable) as a
-  short text message to the game's port (default 1000). For example,
-  Unicorn Speller's network output, or a few lines in any language.
-- **Keys:** send a key press (B, M or E by default, rebindable). The same
-  keys also let you try the controls on a keyboard.
+- **UDP:** send the word (BLINK, MOUTH, EYES, SHAKE or NOD by default,
+  editable) as a short text message to the game's port (default 1000). For
+  example, Unicorn Speller's network output, or a few lines in any language.
+  UDP works even when the game window is not focused.
+- **Keys:** send a key press (B, M, E, N or Y by default, rebindable). The
+  same keys also let you try the controls on a keyboard.
 
 Setup: Settings > Brain interface > tick **Use the brain interface**. The
 status line shows "Listening on UDP port 1000" and the last signal received.

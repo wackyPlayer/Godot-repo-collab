@@ -60,6 +60,12 @@ func run_checks() -> void:
 	check(brain.last_action == "reset" and not brain.running, "A signal can be mapped to another action")
 	settings.signal_actions["eyes"] = "run"
 	brain.release_all()
+	await command("SHAKE")
+	check(brain.moving and brain.last_signal == "shake", "A head shake starts walking too")
+	await command("nod")
+	check(brain.last_signal == "nod" and brain.last_action == "swing", "A nod swings the sword")
+	check(settings.signal_doing("go") == "Close mouth or Head shake", "Hints name every signal that does an action")
+	brain.release_all()
 	await command("dance")
 	check(brain.last_command_text().contains("not a signal word"), "Unknown words are reported, not acted on")
 

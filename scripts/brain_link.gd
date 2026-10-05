@@ -1,10 +1,10 @@
 extends Node
-## Autoloaded as "BrainLink": plays the game from three signals a headset can
-## detect: a blink, a closed mouth and closed eyes.
+## Autoloaded as "BrainLink": plays the game from signals a headset can
+## detect: a blink, a closed mouth, closed eyes, a head shake and a nod.
 ##
 ## A signal arrives either as a UDP text message (a word such as BLINK, sent
-## by the detector to the port in Settings) or as a key press (B, M, E by
-## default), whichever the detection software can output. Settings maps each
+## by the detector to the port in Settings) or as a key press (B, M, E, N, Y
+## by default), whichever the detection software can output. Settings maps each
 ## signal to one action:
 ##   turn  - turn the heading clockwise (up, right, down, left)
 ##   go    - start or stop walking along the heading
@@ -12,7 +12,8 @@ extends Node
 ##   reset - back to the door you came in by
 ##   swing - swing the sword (once you have it)
 ##   drink - drink a potion (if you carry one)
-## In menus, a blink moves to the next button and a closed mouth presses it.
+## In menus, a blink moves to the next button and a closed mouth, head shake
+## or nod presses it.
 ## tools/send_brain_command.py sends test signals without a headset.
 
 signal signal_received(signal_name: String, action: String)
@@ -105,14 +106,15 @@ func receive(signal_name: String) -> String:
 	signal_received.emit(signal_name, action)
 	return action
 
-## Menus: a blink moves to the next button, a closed mouth presses it.
+## Menus: a blink moves to the next button, a closed mouth, head shake or
+## nod presses it.
 func menu_action(focus: BaseButton, signal_name: String) -> String:
 	if signal_name == "blink":
 		var next := focus.find_next_valid_focus()
 		if next:
 			next.grab_focus()
 		return "next button"
-	if signal_name == "mouth":
+	if signal_name in ["mouth", "shake", "nod"]:
 		if focus.toggle_mode:
 			focus.button_pressed = not focus.button_pressed
 		else:

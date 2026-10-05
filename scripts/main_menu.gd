@@ -233,7 +233,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func build_brain_tab() -> Control:
 	var parts := scroll_page("Brain interface")
 	var page: VBoxContainer = parts[1]
-	var help := add_label(page, "Play with a headset that detects three things: a blink, a closed mouth and closed eyes. The detector can send each one as a UDP text message (the word below, to the port below) or as a key press (the key below). In menus, a blink moves to the next button and a closed mouth presses it.", 11, DIM)
+	var help := add_label(page, "Play with a headset that detects a blink, a closed mouth, closed eyes, a head shake or a nod (use the ones your detector reports). The detector can send each one as a UDP text message (the word below, to the port below) or as a key press (the key below). In menus, a blink moves to the next button and a closed mouth, head shake or nod presses it.", 11, DIM)
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help.custom_minimum_size = Vector2(620, 0)
 	var enabled := CheckBox.new()
