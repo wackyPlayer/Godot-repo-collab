@@ -23,6 +23,8 @@ var key_buttons := {}
 var waiting := ""
 var brain_status: Label
 var brain_last: Label
+var brain_checkbox: CheckBox
+var tabs: TabContainer
 var footer: Label
 var mage: Sprite2D
 var time := 0.0
@@ -111,6 +113,9 @@ func open_settings() -> void:
 	main_buttons.visible = false
 	settings_panel.visible = true
 	refresh_keys()
+	# Something must hold focus, or a headset's blinks steer the knight
+	# instead of moving through the menu.
+	tabs.get_tab_bar().grab_focus()
 
 func close_settings() -> void:
 	waiting = ""
@@ -123,6 +128,8 @@ func refresh_status() -> void:
 	if brain_status:
 		brain_status.text = BrainLink.status
 		brain_last.text = BrainLink.last_command_text()
+		# A headset's hello can turn the link on while this screen is open.
+		brain_checkbox.set_pressed_no_signal(Settings.brain_enabled)
 
 # --- Settings -------------------------------------------------------------------
 
@@ -137,7 +144,7 @@ func build_settings() -> void:
 	column.add_theme_constant_override("separation", 8)
 	settings_panel.add_child(column)
 	add_label(column, "SETTINGS", 18, Color("e1d6fb"))
-	var tabs := TabContainer.new()
+	tabs = TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(tabs)
 	tabs.add_child(build_controls_tab())
@@ -236,13 +243,15 @@ func build_brain_tab() -> Control:
 	var help := add_label(page, "Play with a headset that detects a blink, a closed mouth, closed eyes, a head shake or a nod (use the ones your detector reports). The detector can send each one as a UDP text message (the word below, to the port below) or as a key press (the key below). In menus, a blink moves to the next button and a closed mouth, head shake or nod presses it.", 11, DIM)
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help.custom_minimum_size = Vector2(620, 0)
-	var enabled := CheckBox.new()
-	enabled.text = "Use the brain interface"
-	enabled.button_pressed = Settings.brain_enabled
-	enabled.toggled.connect(func(on: bool) -> void:
+	brain_checkbox = CheckBox.new()
+	brain_checkbox.text = "Use the brain interface"
+	brain_checkbox.button_pressed = Settings.brain_enabled
+	brain_checkbox.toggled.connect(func(on: bool) -> void:
 		Settings.brain_enabled = on
+		# The player's own choice, so it is saved.
+		Settings.brain_auto_enabled = false
 		save_and_apply())
-	page.add_child(enabled)
+	page.add_child(brain_checkbox)
 	var port := SpinBox.new()
 	port.min_value = 1
 	port.max_value = 65535
@@ -269,7 +278,8 @@ func build_brain_tab() -> Control:
 		does.selected = Settings.BRAIN_ACTIONS.map(func(pair: Array) -> String: return pair[0]).find(Settings.signal_actions[row.signal])
 		does.item_selected.connect(func(index: int) -> void:
 			Settings.signal_actions[row.signal] = Settings.BRAIN_ACTIONS[index][0]
-			Settings.save_settings())
+			Settings.save_settings()
+			BrainLink.state_changed.emit())
 		grid.add_child(does)
 		var field := LineEdit.new()
 		field.text = Settings.signal_words[row.signal]
@@ -285,7 +295,10 @@ func build_brain_tab() -> Control:
 		grid.add_child(key)
 		var test := Button.new()
 		test.text = "Test"
-		test.pressed.connect(func() -> void: BrainLink.send_test(Settings.split_words(Settings.signal_words[row.signal])[0]))
+		test.pressed.connect(func() -> void:
+			var words: Array = Settings.split_words(Settings.signal_words[row.signal])
+			if not words.is_empty():
+				BrainLink.send_test(words[0]))
 		grid.add_child(test)
 	var cooldown := SpinBox.new()
 	cooldown.min_value = 0.0

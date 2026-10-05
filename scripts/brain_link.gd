@@ -22,14 +22,27 @@ extends Node
 ## tools/send_brain_command.py sends test signals without a headset.
 
 signal signal_received(signal_name: String, action: String)
+## The link turned on or off, or a headset connected, dropped or changed the
+## signals it sends: hints that name signals should be rewritten.
+signal state_changed
 
 const HEADINGS := ["move_up", "move_right", "move_down", "move_left"]
 const HEADING_VECTORS: Array[Vector2] = [Vector2.UP, Vector2.RIGHT, Vector2.DOWN, Vector2.LEFT]
 ## A detector counts as connected this long after its last hello.
 const HELLO_TIMEOUT_MSEC := 3000
 
+## Signals from other computers (only while on).
 var peer := PacketPeerUDP.new()
+## Signals from this computer. Always bound, so a hello can turn the link on;
+## holding the exact address also keeps a second copy of the game from
+## taking this computer's signals away.
+var local_peer := PacketPeerUDP.new()
 var status := "Off"
+## What the sockets were last bound for, so unrelated settings changes (a
+## volume drag) don't rebind them and drop signals.
+var bound_enabled := false
+var bound_port := -1
+var last_state := []
 ## The port status without the detector ("Listening on UDP port 1000").
 var port_status := "Off"
 ## The signals the connected detector said it sends, and when it last said so.
@@ -50,22 +63,33 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	var settings := get_node_or_null("/root/Settings")
 	if settings:
-		settings.changed.connect(restart)
+		settings.changed.connect(on_settings_changed)
 	restart()
+
+func on_settings_changed() -> void:
+	if enabled() != bound_enabled or port() != bound_port:
+		restart()
+
+func port() -> int:
+	var settings := get_node_or_null("/root/Settings")
+	return settings.brain_port if settings else 1000
 
 func restart() -> void:
 	release_all()
 	peer.close()
-	var settings := get_node_or_null("/root/Settings")
-	var port: int = settings.brain_port if settings else 1000
-	if not enabled():
-		# Only this computer, so it never asks for a firewall exception.
-		peer.bind(port, "127.0.0.1")
+	local_peer.close()
+	bound_enabled = enabled()
+	bound_port = port()
+	# Only this computer while off, so it never asks for a firewall exception.
+	var local_ok := local_peer.bind(bound_port, "127.0.0.1") == OK
+	if not bound_enabled:
 		port_status = "Off"
-	elif peer.bind(port, "*") == OK:
-		port_status = "Listening on UDP port %d" % port
+	elif peer.bind(bound_port, "*") != OK:
+		port_status = "Could not open UDP port %d (is another program using it?)" % bound_port
+	elif not local_ok:
+		port_status = "Listening on UDP port %d, but another copy of the game on this computer has it too: close that copy" % bound_port
 	else:
-		port_status = "Could not open UDP port %d (is another program using it?)" % port
+		port_status = "Listening on UDP port %d" % bound_port
 	update_status()
 
 func enabled() -> bool:
@@ -74,7 +98,7 @@ func enabled() -> bool:
 
 ## On and receiving signals (while off it only listens for a hello).
 func is_listening() -> bool:
-	return enabled() and peer.is_bound()
+	return enabled() and (peer.is_bound() or local_peer.is_bound())
 
 func detector_connected() -> bool:
 	return last_hello_msec >= 0 and Time.get_ticks_msec() - last_hello_msec < HELLO_TIMEOUT_MSEC
@@ -85,8 +109,9 @@ func heading_vector() -> Vector2:
 func _process(_delta: float) -> void:
 	# Read everything first: turning the link on rebinds the port.
 	var words: Array[String] = []
-	while peer.is_bound() and peer.get_available_packet_count() > 0:
-		words.append(peer.get_packet().get_string_from_utf8().strip_edges().to_upper())
+	for socket in [local_peer, peer]:
+		while socket.is_bound() and socket.get_available_packet_count() > 0:
+			words.append(socket.get_packet().get_string_from_utf8().strip_edges().to_upper())
 	for word in words:
 		if word.begins_with("HELLO"):
 			hello(word.trim_prefix("HELLO"))
@@ -98,11 +123,18 @@ func _process(_delta: float) -> void:
 				last_signal = word
 				last_action = "unknown"
 				last_msec = Time.get_ticks_msec()
+	# A link the headset turned on turns off again when it goes quiet, so the
+	# next keyboard player isn't left in brain mode.
+	var settings := get_node_or_null("/root/Settings")
+	if settings and settings.brain_auto_enabled and enabled() and not detector_connected():
+		settings.brain_enabled = false
+		settings.brain_auto_enabled = false
+		settings.apply()
 	update_status()
 
 ## A detector saying which signals it sends. The first hello of a session
-## turns the link on; later ones only keep it connected, so unticking the
-## setting while the detector runs is respected.
+## turns the link on (for this session only); later ones only keep it
+## connected, so unticking the setting while the detector runs is respected.
 func hello(words: String) -> void:
 	var settings := get_node_or_null("/root/Settings")
 	if settings == null:
@@ -116,7 +148,7 @@ func hello(words: String) -> void:
 	last_hello_msec = Time.get_ticks_msec()
 	if not was_connected and not settings.brain_enabled:
 		settings.brain_enabled = true
-		settings.save_settings()
+		settings.brain_auto_enabled = true
 		settings.apply()
 
 func update_status() -> void:
@@ -126,6 +158,10 @@ func update_status() -> void:
 		status = "Headset connected (%s), UDP port %d" % [", ".join(names), settings.brain_port]
 	else:
 		status = port_status
+	var state := [enabled(), detector_connected(), detector_signals.duplicate()]
+	if state != last_state:
+		last_state = state
+		state_changed.emit()
 
 func _input(event: InputEvent) -> void:
 	if not enabled() or not event is InputEventKey or not event.pressed or event.echo:
@@ -149,8 +185,8 @@ func receive(signal_name: String) -> String:
 	last_seen[signal_name] = now
 	var action: String = settings.signal_actions.get(signal_name, "none")
 	var focus := get_viewport().gui_get_focus_owner()
-	if focus is BaseButton and focus.is_visible_in_tree():
-		action = menu_action(focus as BaseButton, signal_name)
+	if focus and focus.is_visible_in_tree():
+		action = menu_action(focus, signal_name)
 	else:
 		game_action(action)
 	last_signal = signal_name
@@ -159,21 +195,43 @@ func receive(signal_name: String) -> String:
 	signal_received.emit(signal_name, action)
 	return action
 
-## Menus: a blink moves to the next button, a closed mouth, head shake or
-## nod presses it.
-func menu_action(focus: BaseButton, signal_name: String) -> String:
+## Menus: a blink moves to the next button or tab bar, a closed mouth, head
+## shake or nod presses it (a tab bar shows the next tab, a drop-down picks
+## its next choice).
+func menu_action(focus: Control, signal_name: String) -> String:
 	if signal_name == "blink":
-		var next := focus.find_next_valid_focus()
+		var next := next_menu_control(focus)
 		if next:
 			next.grab_focus()
 		return "next button"
-	if signal_name in ["mouth", "shake", "nod"]:
-		if focus.toggle_mode:
-			focus.button_pressed = not focus.button_pressed
+	if not signal_name in ["mouth", "shake", "nod"]:
+		return "none"
+	if focus is OptionButton:
+		var options := focus as OptionButton
+		options.select((options.selected + 1) % options.item_count)
+		options.item_selected.emit(options.selected)
+	elif focus is BaseButton:
+		var button := focus as BaseButton
+		if button.toggle_mode:
+			button.button_pressed = not button.button_pressed
 		else:
-			focus.pressed.emit()
-		return "press button"
-	return "none"
+			button.pressed.emit()
+	elif focus is TabBar:
+		var tab_bar := focus as TabBar
+		tab_bar.current_tab = (tab_bar.current_tab + 1) % tab_bar.tab_count
+	else:
+		return "none"
+	return "press button"
+
+## The next control a blink can stop on, skipping text fields, spin boxes
+## and sliders, which a headset can't use.
+static func next_menu_control(from: Control) -> Control:
+	var next := from.find_next_valid_focus()
+	for attempt in range(64):
+		if next == null or next == from or next is BaseButton or next is TabBar:
+			return next
+		next = next.find_next_valid_focus()
+	return null
 
 func game_action(action: String) -> void:
 	match action:
@@ -214,9 +272,8 @@ func hold(action: String, pressed: bool) -> void:
 
 ## Sends a word to this game's own port, to check the hook-up works.
 func send_test(word: String) -> void:
-	var settings := get_node_or_null("/root/Settings")
 	var sender := PacketPeerUDP.new()
-	sender.set_dest_address("127.0.0.1", settings.brain_port if settings else 1000)
+	sender.set_dest_address("127.0.0.1", port())
 	sender.put_packet(word.to_utf8_buffer())
 	sender.close()
 

@@ -159,6 +159,19 @@ var inventory := {"sword": 0, "potion": 0, "bubble": 0}
 var item_sources := {"sword": [], "potion": [], "bubble": []}
 var swing_ready := true
 var item_counts := {}
+## Items picked up this run (used ones included), for the win screen.
+var items_found := 0
+## Inventory and progress as the current floor began: retrying the floor
+## restores them, so its items can't be collected twice.
+var floor_start := {}
+## Rooms whose item was used up while standing in them: the item returns
+## once the player leaves, not under their feet.
+var pending_returns: Array[Generator.Room] = []
+## Running potion regenerations, stopped when the player crumbles.
+var regens: Array[Tween] = []
+## Heart index -> the tween animating it, so a newer change replaces it.
+var heart_tweens := {}
+var controls_label: Label
 var run_seed := 0
 var entry_point := START_SPAWN
 var entry_faces_left := false
@@ -193,6 +206,10 @@ func _ready() -> void:
 	add_child(trail)
 	run_seed = dungeon_seed if dungeon_seed != 0 else randi()
 	print("A rocky tower, seed %d" % run_seed)
+	var brain := get_node_or_null("/root/BrainLink")
+	if brain:
+		# The headset can connect (or drop) after the scene started.
+		brain.state_changed.connect(refresh_controls_hint)
 	begin()
 
 ## The dungeon is explored in rock form; tutorial.gd overrides this.
@@ -241,6 +258,13 @@ func _unhandled_input(event: InputEvent) -> void:
 # --- Floor and room flow -----------------------------------------------------
 
 func start_floor() -> void:
+	floor_start = {
+		"inventory": inventory.duplicate(true),
+		"item_sources": item_sources.duplicate(true),
+		"rooms_explored": rooms_explored,
+		"items_found": items_found,
+	}
+	pending_returns.clear()
 	apply_floor_tint()
 	trail.clear_all()
 	if is_final_floor():
@@ -307,6 +331,9 @@ func play_music(track: String) -> void:
 
 ## `via` is the door the knight arrives through, or -1 for the floor's start.
 func enter_room(cell: Vector2i, via: int) -> void:
+	for room in pending_returns:
+		room.item_taken = false
+	pending_returns.clear()
 	current = rooms[cell]
 	if not current.visited:
 		rooms_explored += 1
@@ -376,6 +403,7 @@ func _on_item_entered(body: Node2D, pickup: Area2D) -> void:
 func collect(item: String) -> void:
 	current.item_taken = true
 	inventory[item] += 1
+	items_found += 1
 	item_sources[item].append([floor_number, current.cell])
 	update_hud()
 
@@ -385,7 +413,11 @@ func use_item(item: String) -> void:
 	inventory[item] -= 1
 	var source: Array = item_sources[item].pop_back()
 	if source and source[0] == floor_number and rooms.has(source[1]):
-		rooms[source[1]].item_taken = false
+		var room: Generator.Room = rooms[source[1]]
+		if room == current:
+			pending_returns.append(room)
+		else:
+			room.item_taken = false
 	update_hud()
 
 # --- Items ---------------------------------------------------------------------
@@ -453,6 +485,8 @@ func drink_potion() -> void:
 	for step in range(REGEN_HEARTS):
 		regen.tween_interval(REGEN_STEP)
 		regen.tween_callback(heal)
+	regens.append(regen)
+	regen.finished.connect(func() -> void: regens.erase(regen))
 
 # --- Building the room ------------------------------------------------------
 
@@ -648,7 +682,7 @@ func make_interface() -> void:
 	make_label(hud, "A ROCKY TOWER", Vector2(32, 19), 21, Color("e1d6fb"))
 	status_label = make_label(hud, "", Vector2(236, 18), 12, ACCENT)
 	progress_label = make_label(hud, "", Vector2(236, 35), 10, Color("8a7cab"))
-	make_label(hud, controls_hint(), Vector2(32, 466), 13, Color("c5bdd8"))
+	controls_label = make_label(hud, controls_hint(), Vector2(32, 466), 13, Color("c5bdd8"))
 	var right := make_label(hud, "%s  back to door     Esc  menu" % key_hint("reset", "R"), Vector2(400, 466), 13, Color("9284b1"))
 	right.size.x = 336
 	right.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -758,12 +792,21 @@ func refresh_hearts() -> void:
 	for index in range(MAX_HEALTH):
 		set_heart_frame(index, HeartFrame.FULL if index < health else HeartFrame.BROKEN)
 
-## Steps one heart through a few frames of the sheet.
+## Steps one heart through a few frames of the sheet. A newer animation of
+## the same heart replaces an older one, so it always ends on the latest.
 func animate_heart(index: int, frames: Array, step := 0.07) -> void:
+	stop_heart(index)
 	var tween := hearts[index].create_tween()
+	heart_tweens[index] = tween
 	for frame: HeartFrame in frames:
 		tween.tween_callback(set_heart_frame.bind(index, frame))
 		tween.tween_interval(step)
+
+func stop_heart(index: int) -> void:
+	var tween: Tween = heart_tweens.get(index)
+	if tween and tween.is_valid():
+		tween.kill()
+	heart_tweens.erase(index)
 
 ## Called by anything that hurts the player, with where the hurt came from.
 func take_damage(from: Vector2, attacker: Node = null) -> void:
@@ -786,7 +829,7 @@ func take_damage(from: Vector2, attacker: Node = null) -> void:
 		game_over()
 
 func heal() -> void:
-	if health >= MAX_HEALTH:
+	if health >= MAX_HEALTH or health <= 0:
 		return
 	animate_heart(health, [HeartFrame.FLASH, HeartFrame.FULL])
 	health += 1
@@ -794,10 +837,21 @@ func heal() -> void:
 func restore_health() -> void:
 	health = MAX_HEALTH
 	for index in range(MAX_HEALTH):
+		stop_heart(index)
 		set_heart_frame(index, HeartFrame.FULL)
+
+## Stops brain-held walking and running when a menu takes over.
+func release_brain() -> void:
+	var brain := get_node_or_null("/root/BrainLink")
+	if brain:
+		brain.release_all()
 
 func game_over() -> void:
 	transitioning = true
+	release_brain()
+	for regen in regens:
+		regen.kill()
+	regens.clear()
 	knight.set_physics_process(false)
 	knight.velocity = Vector2.ZERO
 	burst(knight.position + Vector2(0, -10), Color("8f86a8"), 18)
@@ -820,6 +874,11 @@ func retry_floor(layer: CanvasLayer) -> void:
 	await fade_to(1.0)
 	restore_health()
 	knight.modulate.a = 1.0
+	# Back to how things stood when the floor began.
+	inventory = floor_start.inventory.duplicate(true)
+	item_sources = floor_start.item_sources.duplicate(true)
+	rooms_explored = floor_start.rooms_explored
+	items_found = floor_start.items_found
 	start_floor()
 	await fade_to(0.0)
 	knight.set_physics_process(true)
@@ -849,6 +908,12 @@ func controls_hint() -> String:
 	if settings and settings.brain_enabled:
 		return settings.brain_hint()
 	return "%s  move     %s  run     %s  swing     %s  drink" % [move_keys_text(), key_hint("sprint", "Shift"), key_hint("attack", "Space"), key_hint("drink", "Q")]
+
+## Rewrites the bottom-left reminder when the brain link turns on or off or a
+## headset connects; tutorial.gd also rewrites its lesson prompt.
+func refresh_controls_hint() -> void:
+	if controls_label:
+		controls_label.text = controls_hint()
 
 ## Tutorial wording for an action: the brain signal if the headset is on.
 func brain_signal_for(action: String) -> String:
@@ -1226,13 +1291,11 @@ func wait(seconds: float) -> void:
 
 func show_victory() -> void:
 	victory_shown = true
+	release_brain()
 	var seconds := (Time.get_ticks_msec() - start_msec) / 1000
-	var found := 0
-	for count: int in inventory.values():
-		found += count
 	show_menu("Victory", "YOU WIN", [
 		"You reached the bottom of the rocky tower... and you are still a rock. Forever.",
-		"%d:%02d in the tower  /  %d rooms explored  /  %d items found" % [seconds / 60, seconds % 60, rooms_explored, found],
+		"%d:%02d in the tower  /  %d rooms explored  /  %d item%s found" % [seconds / 60, seconds % 60, rooms_explored, items_found, "" if items_found == 1 else "s"],
 	], [
 		["Keep going: endless mode (still a rock)", continue_endless],
 		["Play again from the start", func() -> void: get_tree().change_scene_to_file(TUTORIAL)],

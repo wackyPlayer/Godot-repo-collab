@@ -14,6 +14,7 @@ const SILENT_DB := -60.0
 var players: Array[AudioStreamPlayer] = []
 var active := 0
 var current := ""
+var fading: Tween
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -38,10 +39,13 @@ func play(track: String, fade := 1.5) -> void:
 	incoming.stream = TRACKS[track]
 	incoming.volume_db = SILENT_DB
 	incoming.play()
-	var tween := create_tween().set_parallel()
-	tween.tween_property(incoming, "volume_db", VOLUME_DB, fade)
-	tween.tween_property(outgoing, "volume_db", SILENT_DB, fade)
-	tween.chain().tween_callback(outgoing.stop)
+	# A fade still running would stop the player this one just started.
+	if fading:
+		fading.kill()
+	fading = create_tween().set_parallel()
+	fading.tween_property(incoming, "volume_db", VOLUME_DB, fade)
+	fading.tween_property(outgoing, "volume_db", SILENT_DB, fade)
+	fading.chain().tween_callback(outgoing.stop)
 
 func _exit_tree() -> void:
 	# Release the playbacks before the engine shuts down.

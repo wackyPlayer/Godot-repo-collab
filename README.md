@@ -11,7 +11,7 @@ A top-down Godot 4 dungeon crawl across five floors.
 | 5 | **The sanctum**: one hall and the final cutscene. The mage laughs that there is no cure and you will be a rock forever, then the win screen. |
 
 The win screen offers **endless mode** (floors 6 and beyond, still a rock,
-with more enemies as you go), playing again, or quitting. Floor sizes, enemy
+with more enemies as you go), playing again, or the main menu. Floor sizes, enemy
 counts and speeds are set near the top of `scripts/room.gd`.
 
 **Enemies** (`scripts/enemy.gd`): slime cubes (slow) and skeletons (faster,
@@ -52,7 +52,8 @@ The numbers are constants near the top of `scripts/room.gd`; set
 **Health:** three hearts at the top left: red while you are a knight, stone
 once you are a rock. Touching an enemy costs a heart, knocks you back, and
 leaves you blinking and safe for a moment. Running out shows a game-over menu: retry the same floor (same layout, full
-hearts), go back to the round chamber, or quit.
+hearts, the items you had when you reached the floor), go back to the round
+chamber, or the main menu.
 
 Animated torches light every room. The FPS counter sits at the bottom left.
 The soundtrack lives in the `Music` autoload (`scripts/music.gd`) and
