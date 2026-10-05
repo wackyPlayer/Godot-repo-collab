@@ -1,7 +1,7 @@
 @tool
 extends Node2D
-## Runs the Violet Keep: draws the current room, rebuilds its walls and blocks,
-## and walks the knight between procedurally generated rooms. The keep has
+## Runs A rocky tower: draws the current room, rebuilds its walls and blocks,
+## and walks the knight between procedurally generated rooms. The tower has
 ## five floors: floor 1 is the round chamber (tutorial.gd), floors 2-4 are
 ## generated here, and floor 5 is the mage's sanctum with the final cutscene.
 ## Winning unlocks an endless mode.
@@ -39,6 +39,8 @@ const HELL_TINT_BRIGHT := Color(1.6, 0.3, 0.18)
 ## start, and enemies as fast as the player's run, with red eyes.
 const FAST_FLOOR := 4
 const FAST_FLOOR_ROOMS := 22
+## Floor 4 enemies are tough: this many sword hits each.
+const FAST_FLOOR_ENEMY_HITS := 5
 const FAST_FLOOR_EXIT_DISTANCE := 8
 const ENRAGED_SIGHT := 300.0
 ## Where the mage waits in the sanctum.
@@ -190,7 +192,7 @@ func _ready() -> void:
 	trail.target = knight
 	add_child(trail)
 	run_seed = dungeon_seed if dungeon_seed != 0 else randi()
-	print("Violet Keep seed %d" % run_seed)
+	print("A rocky tower, seed %d" % run_seed)
 	begin()
 
 ## The dungeon is explored in rock form; tutorial.gd overrides this.
@@ -434,8 +436,8 @@ func swing() -> void:
 			continue
 		var offset: Vector2 = node.position + Vector2(0, -10) - body
 		if offset.length() <= SWING_REACH and absf(aim.angle_to(offset)) <= SWING_ARC + 0.3:
-			burst(node.position + Vector2(0, -12), Color("e1d6fb"), 10)
-			node.call("defeat")
+			var defeated: bool = node.call("take_hit", knight.position)
+			burst(node.position + Vector2(0, -12), Color("e1d6fb"), 10 if defeated else 5)
 	await get_tree().create_timer(SWING_COOLDOWN).timeout
 	swing_ready = true
 
@@ -552,6 +554,7 @@ func spawn_enemy(kind: String, at: Vector2) -> CharacterBody2D:
 	enemy.connect("touched", take_damage.bind(enemy))
 	if is_fast_floor():
 		enemy.call("enrage", Knight.RUN_SPEED, ENRAGED_SIGHT)
+		enemy.set("max_hits", FAST_FLOOR_ENEMY_HITS)
 	props.add_child(enemy)
 	return enemy
 
@@ -578,6 +581,8 @@ func make_area(bounds: Rect2, parent: Node) -> Area2D:
 	var area := Area2D.new()
 	area.position = bounds.get_center()
 	area.monitorable = false
+	# Doors, stairs and pickups only care about the player.
+	area.collision_mask = Knight.LAYER
 	area.add_child(make_shape(bounds.size))
 	parent.add_child(area)
 	return area
@@ -640,7 +645,7 @@ func make_interface() -> void:
 		panel.color = Color("070510")
 		panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		hud.add_child(panel)
-	make_label(hud, "THE VIOLET KEEP", Vector2(32, 19), 21, Color("e1d6fb"))
+	make_label(hud, "A ROCKY TOWER", Vector2(32, 19), 21, Color("e1d6fb"))
 	status_label = make_label(hud, "", Vector2(236, 18), 12, ACCENT)
 	progress_label = make_label(hud, "", Vector2(236, 35), 10, Color("8a7cab"))
 	make_label(hud, controls_hint(), Vector2(32, 466), 13, Color("c5bdd8"))
@@ -881,11 +886,11 @@ func update_hud() -> void:
 	match current.kind:
 		"start":
 			if endless:
-				caption_label.text = "The endless depths, floor %d. How far down does the keep go?" % floor_number
+				caption_label.text = "The endless depths, floor %d. How far down does the tower go?" % floor_number
 			elif floor_number == FIRST_DUNGEON_FLOOR:
 				caption_label.text = "Stone, but still moving. Slimes and skeletons roam these halls."
 			elif is_red_floor():
-				caption_label.text = "The keep runs red. Every room is crawling."
+				caption_label.text = "The tower runs red. Every room is crawling."
 			elif is_fast_floor():
 				caption_label.text = "Their eyes burn red and they run as fast as you. The stairs are far."
 			else:
@@ -1226,8 +1231,8 @@ func show_victory() -> void:
 	for count: int in inventory.values():
 		found += count
 	show_menu("Victory", "YOU WIN", [
-		"You reached the bottom of the Violet Keep... and you are still a rock. Forever.",
-		"%d:%02d in the keep  /  %d rooms explored  /  %d items found" % [seconds / 60, seconds % 60, rooms_explored, found],
+		"You reached the bottom of the rocky tower... and you are still a rock. Forever.",
+		"%d:%02d in the tower  /  %d rooms explored  /  %d items found" % [seconds / 60, seconds % 60, rooms_explored, found],
 	], [
 		["Keep going: endless mode (still a rock)", continue_endless],
 		["Play again from the start", func() -> void: get_tree().change_scene_to_file(TUTORIAL)],

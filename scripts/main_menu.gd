@@ -81,7 +81,7 @@ func build_scenery() -> void:
 	add_child(mage)
 
 func build_main_buttons() -> void:
-	var title := add_label(self, "THE VIOLET KEEP", 38, Color("e1d6fb"))
+	var title := add_label(self, "A ROCKY TOWER", 38, Color("e1d6fb"))
 	title.position = Vector2(0, 98)
 	title.size.x = SCREEN.x
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

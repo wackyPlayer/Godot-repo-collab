@@ -28,6 +28,20 @@ var wander := Vector2.ZERO
 var wander_left := 0.0
 var time := randf() * 4.0
 var asleep := WAKE_TIME
+## The enemy's body, relative to its feet. Touching the player's hurt area
+## with it costs a heart; checked directly every frame, so an enemy that has
+## reached the player always connects, from any side.
+@export var hit_rect := Rect2(-11, -14, 22, 14)
+## Sword hits it takes to defeat (room.gd raises this on floor 4). Tough
+## enemies show their remaining hits as pips above their head.
+@export var max_hits := 1
+var hits_left := 1
+## After a hit that does not defeat it: a short shove and a moment where it
+## can neither move nor hurt, so the next swing can follow up.
+const HIT_STUN := 0.3
+const HIT_KNOCKBACK := 170.0
+var stunned := 0.0
+var shove := Vector2.ZERO
 ## Set before the enemy enters the tree.
 var enraged := false
 ## While trapped in a bubble the enemy floats in place and cannot hurt.
@@ -36,11 +50,11 @@ var bubble: Sprite2D
 var defeated := false
 
 @onready var sprite: Sprite2D = $Sprite
-@onready var hitbox: Area2D = $Hitbox
 
 func _ready() -> void:
 	motion_mode = CharacterBody2D.MOTION_MODE_FLOATING
 	home = position
+	hits_left = max_hits
 	if enraged and red_eyes:
 		sprite.texture = red_eyes
 	face(false)
@@ -66,6 +80,12 @@ func _physics_process(delta: float) -> void:
 	if asleep > 0.0:
 		asleep -= delta
 		return
+	if stunned > 0.0:
+		stunned -= delta
+		velocity = shove
+		shove = shove.move_toward(Vector2.ZERO, 900.0 * delta)
+		move_and_slide()
+		return
 	if is_instance_valid(target) and position.distance_to(target.position) < sight:
 		velocity = position.direction_to(target.position) * chase_speed
 	else:
@@ -79,8 +99,8 @@ func _physics_process(delta: float) -> void:
 	if absf(velocity.x) > 1.0:
 		face(velocity.x < 0.0)
 	move_and_slide()
-	for body in hitbox.get_overlapping_bodies():
-		if body == target:
+	if is_instance_valid(target) and target.has_method("hurt_rect"):
+		if Rect2(position + hit_rect.position, hit_rect.size).intersects(target.call("hurt_rect")):
 			touched.emit(position)
 
 ## Traps the enemy in a bubble for `seconds`; it cannot move or hurt.
@@ -111,14 +131,40 @@ func release() -> void:
 func sprite_rest_y() -> float:
 	return -16.0
 
-## Struck by the sword: flash, shrink and vanish.
+## Struck by the sword from `from`. Returns true if this hit defeats it.
+func take_hit(from: Vector2) -> bool:
+	if defeated:
+		return false
+	hits_left -= 1
+	if hits_left <= 0:
+		defeat()
+		return true
+	queue_redraw()
+	var flash := create_tween()
+	flash.tween_property(sprite, "modulate", Color(2.4, 2.4, 2.4), 0.05)
+	flash.tween_property(sprite, "modulate", Color.WHITE, 0.15)
+	if trapped <= 0.0:
+		stunned = HIT_STUN
+		shove = from.direction_to(position) * HIT_KNOCKBACK
+	return false
+
+## Remaining hits as small pips above the head (tough enemies only).
+func _draw() -> void:
+	if max_hits <= 1 or defeated:
+		return
+	var width := max_hits * 5 - 1
+	for index in range(max_hits):
+		var pip := Rect2(-width / 2.0 + index * 5, -50, 4, 3)
+		draw_rect(pip.grow(1), Color("07050f"))
+		draw_rect(pip, Color("ff4a4a") if index < hits_left else Color("3a2030"))
+
+## Struck by the sword for the last time: flash, shrink and vanish.
 func defeat() -> void:
 	if defeated:
 		return
 	defeated = true
 	set_physics_process(false)
 	$Feet.set_deferred("disabled", true)
-	hitbox.set_deferred("monitoring", false)
 	if bubble:
 		bubble.queue_free()
 	var vanish := create_tween().set_parallel()
