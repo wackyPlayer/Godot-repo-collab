@@ -1,0 +1,39 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/tutorial.gd" id="1_tutorial"]
+[ext_resource type="PackedScene" path="res://scenes/knight.tscn" id="2_knight"]
+[ext_resource type="Texture2D" path="res://assets/mage_idle.png" id="3_mage"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_mage"]
+size = Vector2(14, 6)
+
+[node name="Antechamber" type="Node2D"]
+y_sort_enabled = true
+texture_filter = 1
+script = ExtResource("1_tutorial")
+
+[node name="Boundaries" type="Node2D" parent="."]
+
+[node name="Blocks" type="Node2D" parent="."]
+y_sort_enabled = true
+
+[node name="Props" type="Node2D" parent="."]
+y_sort_enabled = true
+
+[node name="Mage" type="StaticBody2D" parent="."]
+position = Vector2(384, 150)
+
+[node name="Sprite" type="Sprite2D" parent="Mage"]
+position = Vector2(0, -12)
+texture = ExtResource("3_mage")
+vframes = 2
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Mage"]
+position = Vector2(0, -3)
+shape = SubResource("RectangleShape2D_mage")
+
+[node name="Knight" parent="." instance=ExtResource("2_knight")]
+position = Vector2(384, 736)
+
+[node name="FrontWalls" type="Node2D" parent="."]
+z_index = 1

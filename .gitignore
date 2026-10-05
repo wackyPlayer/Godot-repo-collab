@@ -1,0 +1,6 @@
+.godot/
+*.tmp
+artifacts/*.log
+artifacts/capture_stdout.txt
+artifacts/capture_stderr.txt
+artifacts/door_fix/
