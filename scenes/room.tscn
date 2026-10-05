@@ -3,7 +3,7 @@
 [ext_resource type="Script" uid="uid://bbo0f02qi2wnc" path="res://scripts/room.gd" id="1_room"]
 [ext_resource type="PackedScene" path="res://scenes/knight.tscn" id="2_knight"]
 
-[node name="VioletKeep" type="Node2D" unique_id=5881949]
+[node name="RockyTower" type="Node2D" unique_id=5881949]
 y_sort_enabled = true
 texture_filter = 1
 script = ExtResource("1_room")

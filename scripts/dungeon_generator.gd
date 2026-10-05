@@ -1,5 +1,5 @@
 extends RefCounted
-## Plans one floor of the keep: a branching grid of rooms joined by doors, each
+## Plans one floor of the tower: a branching grid of rooms joined by doors, each
 ## with an interior picked from hand-drawn templates or scattered stone.
 ## Pure data. room.gd turns it into collision and drawing.
 

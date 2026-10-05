@@ -8,6 +8,7 @@ size = Vector2(18, 6)
 
 [node name="Knight" type="CharacterBody2D"]
 texture_filter = 1
+collision_layer = 8
 motion_mode = 1
 script = ExtResource("2_knight")
 

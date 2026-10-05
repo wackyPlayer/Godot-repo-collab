@@ -1,4 +1,4 @@
-# Caballerito — The Violet Keep
+# Caballerito — A rocky tower
 
 A top-down Godot 4 dungeon crawl across five floors.
 
@@ -17,14 +17,19 @@ counts and speeds are set near the top of `scripts/room.gd`.
 **Enemies** (`scripts/enemy.gd`): slime cubes (slow) and skeletons (faster,
 see further). They wander near where they spawn and chase you on sight. They
 wait a moment after you enter a room, and never spawn near the door you came
-in by. Floor 4 swaps in the red-eyed sheets (`assets/*_red.png`).
+in by. On floor 4 every enemy takes 5 sword hits (red pips above its head
+count them down); each hit that does not finish it flashes it, shoves it
+back and stuns it for a moment. Contact is checked directly every frame: an enemy's body touching your lower
+body costs a heart from any side. Enemies are not stopped by your body, so
+they cannot be held off at arm's length. Floor 4 swaps in the red-eyed sheets (`assets/*_red.png`).
 
 The floor tints colour only the room (floor, walls, blocks), so the player,
 enemies and their red eyes stay readable. The mage is drawn at 3x, and the
 camera pans to frame it during both cutscenes.
 
 **The rock's trail** (`scripts/rock_trail.gd`): in rock form you scrape a pale
-trail and scatter gravel behind you. Each mark fades out and is gone 20
+trail and scatter gravel behind you, and stone chips spray out behind you
+while you move (the `Carving` particles in `scripts/knight.gd`). Each mark fades out and is gone 20
 seconds later. Trails are kept per room, so they show where you just were,
 which helps on floor 4.
 
@@ -118,7 +123,7 @@ arrive there from below.
 
 Add a room design by appending a template to `LAYOUTS`. The generator handles
 mirroring, door clearance and reachability. Set `dungeon_seed` on the
-`VioletKeep` node to replay a specific dungeon (0 = random each run).
+`RockyTower` node to replay a specific dungeon (0 = random each run).
 
 `scripts/tutorial.gd` extends `room.gd` with the round chamber (a ring wall
 with curved collision), the lessons and the mage's curse scene. `scripts/room.gd` turns the current room into walls, door triggers, blocks and
@@ -149,6 +154,7 @@ godot --headless --path . --script res://tests/tutorial_smoke.gd
 godot --headless --path . --script res://tests/floors_smoke.gd
 godot --headless --path . --script res://tests/menu_smoke.gd
 godot --headless --path . --script res://tests/items_smoke.gd
+godot --headless --path . --script res://tests/contact_smoke.gd
 godot --headless --path . --script res://tests/door_regression.gd
 ```
 

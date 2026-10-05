@@ -32,6 +32,7 @@ func run_checks() -> void:
 	await check_hitboxes(sprite)
 	await check_health()
 	await check_trail()
+	await check_carving()
 	await check_doors()
 	await check_gem_and_stairs()
 
@@ -196,6 +197,26 @@ func walk_until_room_changes(keycode: Key) -> void:
 			break
 	key(keycode, false)
 	await ticks(2)
+
+## Stone chips fly while the rock moves, and only then.
+func check_carving() -> void:
+	var chips: CPUParticles2D = knight.get_node("Carving")
+	knight.call("reset_to", room.CENTER)
+	await ticks(3)
+	check(not chips.emitting, "A still rock throws no chips")
+	key(KEY_D, true)
+	await ticks(4)
+	check(chips.emitting and chips.direction.x < 0.0, "A moving rock throws chips back behind it")
+	key(KEY_D, false)
+	await ticks(3)
+	check(not chips.emitting, "Chips stop when the rock stops")
+	knight.call("set_rock", false)
+	key(KEY_A, true)
+	await ticks(4)
+	check(not chips.emitting, "A knight throws no chips")
+	key(KEY_A, false)
+	await ticks(2)
+	knight.call("set_rock", true)
 
 ## The rock drags a trail behind it that is gone 20 seconds later.
 func check_trail() -> void:

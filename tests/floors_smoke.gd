@@ -53,6 +53,11 @@ func run_checks() -> void:
 	var sprite: Sprite2D = enemy.get_node("Sprite")
 	check(enemy.chase_speed == Knight.RUN_SPEED, "Floor 4 enemies chase as fast as the player runs")
 	check(sprite.texture.resource_path.ends_with("_red.png"), "Floor 4 enemies have red eyes")
+	var hits := 0
+	while is_instance_valid(enemy) and not enemy.defeated and hits < 10:
+		enemy.take_hit(knight.position)
+		hits += 1
+	check(hits == room.FAST_FLOOR_ENEMY_HITS, "A floor 4 enemy takes 5 sword hits (took %d)" % hits)
 	var kinds := {}
 	for cell: Vector2i in room.rooms:
 		room.enter_room(cell, -1)

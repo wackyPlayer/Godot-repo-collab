@@ -111,7 +111,7 @@ func curse() -> void:
 	knight.call("face", knight.position.x > mage.position.x)
 	# The mage is tall: frame the shot between the two of them.
 	await pan_camera((mage.position - knight.position) / 2.0 + Vector2(0, -30))
-	await say("Another knight, sneaking into my keep?", 1.8)
+	await say("Another knight, sneaking into my tower?", 1.8)
 	await say("Then stand guard here... forever.", 1.5)
 	speech.text = ""
 	casting = true
@@ -237,7 +237,7 @@ func travel(_direction: int) -> void:
 
 func update_hud() -> void:
 	status_label.text = "FLOOR 1 OF %d  /  THE ROUND CHAMBER" % FINAL_FLOOR
-	progress_label.text = "CABALLERITO ENTERS THE VIOLET KEEP"
+	progress_label.text = "CABALLERITO ENTERS THE ROCKY TOWER"
 	caption_label.text = ""
 	match step:
 		Step.WALK:

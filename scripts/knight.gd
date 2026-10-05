@@ -16,8 +16,16 @@ const ROCK_SHIFT := 3.0
 const KNOCKBACK := 260.0
 const KNOCKBACK_DECAY := 900.0
 const INVULNERABLE_TIME := 1.2
+## Where enemies can hurt the player: the lower body, a little narrower than
+## the sprite. Enemies test their own body against this every frame.
+const HURT_RECT := Rect2(-7, -18, 14, 18)
+## The player's own physics layer: walls and blocks stop the player, but
+## enemies walk right up to (and onto) them instead of being held off.
+const LAYER := 8
 
 @onready var sprite: Sprite2D = $KnightSprite
+## Stone chips kicked up behind a moving rock: the floor being carved.
+var carving: CPUParticles2D
 @onready var camera: Camera2D = $Camera2D
 var animation_time := 0.0
 var was_moving := false
@@ -33,6 +41,36 @@ var boost_left := 0.0
 func _ready() -> void:
 	motion_mode = CharacterBody2D.MOTION_MODE_FLOATING
 	add_to_group("knight")
+	carving = make_carving()
+	add_child(carving)
+	# Drawn first, so the chips spray out from under the rock.
+	move_child(carving, 0)
+
+func make_carving() -> CPUParticles2D:
+	var chips := CPUParticles2D.new()
+	chips.name = "Carving"
+	chips.position = Vector2(0, -2)
+	chips.emitting = false
+	chips.local_coords = false
+	chips.amount = 28
+	chips.lifetime = 0.5
+	chips.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	chips.emission_rect_extents = Vector2(6, 2)
+	chips.spread = 55.0
+	chips.gravity = Vector2(0, 60)
+	chips.initial_velocity_min = 20.0
+	chips.initial_velocity_max = 55.0
+	chips.damping_min = 40.0
+	chips.damping_max = 80.0
+	chips.scale_amount_min = 1.0
+	chips.scale_amount_max = 2.5
+	var stone := Gradient.new()
+	stone.colors = PackedColorArray([Color(0.62, 0.56, 0.74), Color(0.86, 0.8, 0.95)])
+	chips.color_initial_ramp = stone
+	var fade := Gradient.new()
+	fade.colors = PackedColorArray([Color(1, 1, 1, 1), Color(1, 1, 1, 0)])
+	chips.color_ramp = fade
+	return chips
 
 func _physics_process(delta: float) -> void:
 	var direction := Input.get_vector("move_left", "move_right", "move_up", "move_down")
@@ -64,8 +102,18 @@ func _physics_process(delta: float) -> void:
 		sprite.texture = sheet(moving)
 		was_moving = moving
 	animation_time += delta * ((12.0 if running else 8.0) if moving else 3.0)
+	# Chips fly back from the direction of travel while a rock moves.
+	carving.emitting = rock and moving and is_physics_processing()
+	if carving.emitting:
+		carving.direction = -velocity.normalized() if velocity != Vector2.ZERO else Vector2.UP
+		carving.speed_scale = 1.4 if running else 1.0
 	# A rock sits still until it moves; the knight breathes while idle.
 	sprite.frame = 0 if rock and not moving else int(animation_time) % 4
+
+func _process(_delta: float) -> void:
+	# Cutscenes and doors pause movement; no chips while frozen.
+	if not is_physics_processing() and carving.emitting:
+		carving.emitting = false
 
 func face(left: bool) -> void:
 	var shift := ROCK_SHIFT if rock else SPRITE_SHIFT
@@ -90,6 +138,9 @@ func hurt(from: Vector2) -> void:
 	knockback = from.direction_to(position) * KNOCKBACK
 	invulnerable = INVULNERABLE_TIME
 
+func hurt_rect() -> Rect2:
+	return Rect2(position + HURT_RECT.position, HURT_RECT.size)
+
 func is_invulnerable() -> bool:
 	return invulnerable > 0.0
 
@@ -99,6 +150,8 @@ func reset_to(spawn: Vector2, face_left := false) -> void:
 	knockback = Vector2.ZERO
 	invulnerable = 0.0
 	sprite.modulate.a = 1.0
+	if carving:
+		carving.emitting = false
 	animation_time = 0.0
 	was_moving = false
 	sprite.texture = sheet(false)
