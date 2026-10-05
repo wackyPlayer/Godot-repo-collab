@@ -218,6 +218,8 @@ func rebuild() -> void:
 		if current.doors[direction]:
 			for part in split_wall(WALLS[direction], DOOR_GAPS[direction], direction % 2 == 0):
 				make_wall(part)
+			if direction % 2 == 1:
+				make_door_lintel(direction)
 			make_wall(DOOR_STOPS[direction])
 			make_area(DOOR_TRIGGERS[direction], boundaries).body_entered.connect(_on_door_entered.bind(direction))
 		else:
@@ -271,6 +273,16 @@ static func make_shape(size: Vector2) -> CollisionShape2D:
 	shape.size = size
 	collision.shape = shape
 	return collision
+
+func make_door_lintel(direction: int) -> void:
+	# Sort the tile above a side doorway at the jamb's base, just like a
+	# pillar. Feet below it place the head in front; feet above stay behind.
+	# Blocks is already Y-sorted with the knight, and cleared on room swaps.
+	var lintel := Node2D.new()
+	lintel.name = "DoorLintel%d" % direction
+	lintel.position = DOOR_GAPS[direction].position
+	lintel.draw.connect(draw_door_lintel.bind(lintel, direction))
+	blocks.add_child(lintel)
 
 func make_item() -> void:
 	var pickup := make_area(Rect2(CENTER.x - 10, CENTER.y - 4, 20, 16), props)
@@ -471,8 +483,9 @@ func _draw() -> void:
 		draw_rect(Rect2(x - 2, 75, 4, 8), Color("c5b2ff"))
 		draw_rect(Rect2(x - 1, 77, 2, 4), Color("f0e5ff"))
 
-## The side and south walls are drawn on a layer above the knight, so any
-## part of the sprite that pokes past them is hidden instead of drawn on top.
+## The side and south walls cover sprites outside the room. The upper side
+## door jambs are separate Y-sorted pieces so they do not cover a head when
+## the feet are already standing inside the open passage.
 static func is_front_wall(column: int, row: int) -> bool:
 	return column == 0 or column == COLUMNS - 1 or row == ROWS - 1
 
@@ -483,7 +496,10 @@ func draw_front_walls() -> void:
 				continue
 			var rect := Rect2(ORIGIN + Vector2(column, row) * TILE, Vector2(TILE, TILE))
 			# Open passages are ground, already drawn below the knight.
-			if doorway_at(column, row) < 0:
+			var upper_jamb := row == ROWS / 2 - 2 and (
+				(column == 0 and has_door(Generator.WEST)) or
+				(column == COLUMNS - 1 and has_door(Generator.EAST)))
+			if doorway_at(column, row) < 0 and not upper_jamb:
 				# Corner tiles continue the vertical wall. A north-face base
 				# shadow here would draw a false seam across that wall.
 				draw_wall(rect, front_walls)
@@ -513,7 +529,11 @@ func draw_edge(strip: Rect2, color: Color, side: int, canvas: CanvasItem = null)
 	if not has_door(side):
 		target.draw_rect(strip, color)
 		return
-	for part in split_wall(strip, DOOR_GAPS[side], side % 2 == 0):
+	var gap := DOOR_GAPS[side]
+	if side % 2 == 1:
+		# This tile and its trim are drawn by the Y-sorted upper jamb.
+		gap = Rect2(gap.position - Vector2(0, TILE), gap.size + Vector2(0, TILE))
+	for part in split_wall(strip, gap, side % 2 == 0):
 		target.draw_rect(part, color)
 
 ## Brick tiles join without seams. The north wall is seen face-on, so it is
@@ -549,8 +569,17 @@ func draw_door_frame(canvas: CanvasItem, direction: int) -> void:
 		canvas.draw_rect(Rect2(gap.position.x - 4, gap.position.y, 4, 32), post)
 		canvas.draw_rect(Rect2(gap.end.x, gap.position.y, 4, 32), post)
 	else:
-		canvas.draw_rect(Rect2(gap.position.x, gap.position.y - 4, 32, 4), post)
 		canvas.draw_rect(Rect2(gap.position.x, gap.end.y, 32, 4), post)
+
+func draw_door_lintel(canvas: Node2D, direction: int) -> void:
+	draw_wall(Rect2(0, -TILE, TILE, TILE), canvas)
+	var inner_x := 0 if direction == Generator.EAST else TILE - 3
+	var outer_x := TILE - 3 if direction == Generator.EAST else 0
+	var outline_x := TILE - 1 if direction == Generator.EAST else 0
+	canvas.draw_rect(Rect2(inner_x, -TILE, 3, TILE), Color("766187"))
+	canvas.draw_rect(Rect2(outer_x, -TILE, 3, TILE), Color("766187"))
+	canvas.draw_rect(Rect2(0, -4, TILE, 4), Color("8f7bb0"))
+	canvas.draw_rect(Rect2(outline_x, -TILE, 1, TILE), Color("21192f"))
 
 func draw_door_threshold(direction: int) -> void:
 	# This is floor trim, so the knight walks over it rather than behind it.
