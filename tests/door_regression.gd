@@ -38,6 +38,13 @@ func run_checks() -> void:
 		# the old 8px trigger margin (the feet are 9px wide on either side).
 		await cross_door(Generator.EAST, 0.1, Vector2(712.4, room.CENTER.y + 2), false, rock)
 		await cross_door(Generator.WEST, 0.1, Vector2(55.6, room.CENTER.y + 2), false, rock)
+		for direction in [Generator.EAST, Generator.WEST]:
+			var gap: Rect2 = room.DOOR_GAPS[direction]
+			for feet_y in [gap.position.y + 6.25, gap.end.y - 0.25]:
+				var start: Vector2 = room.DOOR_SPAWNS[direction]
+				start.y = feet_y
+				await cross_door(direction, 1.0, start, false, rock)
+				await cross_door(direction, 4.0, start, true, rock)
 	room.queue_free()
 	await process_frame
 	if failures == 0:
@@ -61,7 +68,7 @@ func cross_door(direction: int, time_scale: float, start: Vector2, sprint: bool,
 	await ticks(2)
 	var form := "rock" if rock else "knight"
 	var mode := "sprinting" if sprint else "slow walking"
-	check(room.current.cell == Generator.OFFSETS[direction], "%s %s through direction %d (position %s)" % [form, mode, direction, knight.position])
+	check(room.current.cell == Generator.OFFSETS[direction], "%s %s through direction %d from %s (position %s)" % [form, mode, direction, start, knight.position])
 	check(not room.transitioning and knight.is_physics_processing(), "Movement resumes after the door transition")
 	var camera: Camera2D = knight.get_node("Camera2D")
 	check(camera.get_screen_center_position().distance_to(knight.global_position) < 0.1, "Camera follows the player after moving and changing rooms")

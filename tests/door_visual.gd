@@ -35,26 +35,26 @@ func capture() -> void:
 		knight.call("set_rock", rock)
 		for direction in range(4):
 			knight.call("reset_to", positions[direction], direction == Generator.WEST)
-			knight.visible = false
-			var background := await rendered_image()
-			knight.visible = true
-			var foreground := await rendered_image()
-			var source := sprite.texture.get_image()
-			var top_left := Vector2i(sprite.get_global_transform_with_canvas().origin - Vector2(16, 16))
-			var opaque := 0
-			var visible := 0
-			for y in range(32):
-				for x in range(32):
-					var source_x := 127 - (x * 4 + 2) if sprite.flip_h else x * 4 + 2
-					if source.get_pixel(source_x, y * 4 + 2).a < 0.99:
-						continue
-					opaque += 1
-					var pixel := top_left + Vector2i(x, y)
-					if foreground.get_pixelv(pixel) != background.get_pixelv(pixel):
-						visible += 1
 			var form := "rock" if rock else "knight"
-			check(visible == opaque, "%s visible in %s door: %d/%d sprite pixels" % [form, NAMES[direction], visible, opaque])
-			foreground.save_png("res://artifacts/door_fix/%s_%s_%s.png" % [phase, form, NAMES[direction]])
+			await check_sprite(knight, sprite, "%s visible in %s door" % [form, NAMES[direction]], "%s_%s_%s" % [phase, form, NAMES[direction]])
+		# Feet can enter right below the upper jamb. Every animation frame
+		# must remain visible there, even with its head above the opening.
+		for direction in [Generator.EAST, Generator.WEST]:
+			var gap: Rect2 = room.DOOR_GAPS[direction]
+			for edge in ["upper", "lower"]:
+				var at: Vector2 = positions[direction]
+				at.y = gap.position.y + 6.25 if edge == "upper" else gap.end.y - 0.25
+				knight.call("reset_to", at, direction == Generator.WEST)
+				for frame in range(4):
+					sprite.frame = frame
+					var caption := "%s %s door %s edge frame %d" % ["rock" if rock else "knight", NAMES[direction], edge, frame]
+					await check_sprite(knight, sprite, caption, "%s_%s_%s_%s_%d" % [phase, "rock" if rock else "knight", NAMES[direction], edge, frame])
+			# Above the doorway the same tile is still a solid wall, and must
+			# cover sprites behind it rather than drawing every wall behind us.
+			var behind: Vector2 = positions[direction]
+			behind.y = gap.position.y - 8
+			knight.call("reset_to", behind, direction == Generator.WEST)
+			await check_sprite(knight, sprite, "Solid %s wall still occludes %s above its door" % [NAMES[direction], "rock" if rock else "knight"], "", false)
 	knight.call("set_rock", false)
 	knight.call("reset_to", room.START_SPAWN)
 	# A full-size canvas captures the entire tall room for corner inspection.
@@ -94,6 +94,28 @@ func rendered_image() -> Image:
 	await process_frame
 	await RenderingServer.frame_post_draw
 	return root.get_texture().get_image()
+
+func check_sprite(knight: CharacterBody2D, sprite: Sprite2D, caption: String, filename: String, fully_visible := true) -> void:
+	knight.visible = false
+	var background := await rendered_image()
+	knight.visible = true
+	var foreground := await rendered_image()
+	var source := sprite.texture.get_image()
+	var top_left := Vector2i(sprite.get_global_transform_with_canvas().origin - Vector2(16, 16))
+	var opaque := 0
+	var visible := 0
+	for y in range(32):
+		for x in range(32):
+			var source_x := 127 - (x * 4 + 2) if sprite.flip_h else x * 4 + 2
+			if source.get_pixel(source_x, sprite.frame * 128 + y * 4 + 2).a < 0.99:
+				continue
+			opaque += 1
+			var pixel := top_left + Vector2i(x, y)
+			if foreground.get_pixelv(pixel) != background.get_pixelv(pixel):
+				visible += 1
+	check(visible == opaque if fully_visible else visible < opaque, "%s: %d/%d sprite pixels" % [caption, visible, opaque])
+	if not filename.is_empty():
+		foreground.save_png("res://artifacts/door_fix/%s.png" % filename)
 
 func check(condition: bool, caption: String) -> void:
 	if condition:
