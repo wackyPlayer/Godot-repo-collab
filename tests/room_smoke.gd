@@ -9,6 +9,8 @@ var room: Node2D
 var knight: CharacterBody2D
 
 func _initialize() -> void:
+	# Default keys, whatever the player has rebound.
+	root.get_node("Settings").use_defaults()
 	call_deferred("run_checks")
 
 func run_checks() -> void:
@@ -16,6 +18,7 @@ func run_checks() -> void:
 	Engine.time_scale = 4.0
 	room = load("res://scenes/room.tscn").instantiate()
 	room.dungeon_seed = SEED
+	room.enemies = false
 	room.fade_time = 0.0
 	root.add_child(room)
 	knight = room.get_node("Knight")
@@ -27,6 +30,8 @@ func run_checks() -> void:
 
 	await check_movement()
 	await check_hitboxes(sprite)
+	await check_health()
+	await check_trail()
 	await check_doors()
 	await check_gem_and_stairs()
 
@@ -53,18 +58,20 @@ func check_generator() -> void:
 				if room_data.doors[direction] and (other == null or not other.doors[Generator.opposite(direction)]):
 					bad_rooms += 1
 			var blocked := {}
-			for cell in room_data.blocks + room_data.ornaments:
+			for cell in room_data.blocks:
 				blocked[cell] = true
 			if not Generator.is_traversable(blocked, room_data):
 				bad_rooms += 1
+		if rooms.has(Generator.BELOW_START) or rooms[Vector2i.ZERO].doors[Generator.SOUTH]:
+			bad_rooms += 1
 		if rooms.size() != count or exits != 1 or reachable(rooms) != count or rooms[Vector2i.ZERO].kind != "start":
 			bad_rooms += 1
-	check(bad_rooms == 0, "300 seeded floors: right size, one dead-end exit, matching doors, every door reachable")
+	check(bad_rooms == 0, "300 seeded floors: right size, one dead-end exit, matching doors, every door reachable, nothing below the start")
 	var a: Dictionary = generator.generate(42, 12)
 	var b: Dictionary = generator.generate(42, 12)
 	var same := a.keys() == b.keys()
 	for cell in a:
-		same = same and a[cell].blocks == b[cell].blocks and a[cell].ornaments == b[cell].ornaments and a[cell].doors == b[cell].doors and a[cell].layout == b[cell].layout
+		same = same and a[cell].blocks == b[cell].blocks and a[cell].torches == b[cell].torches and a[cell].doors == b[cell].doors and a[cell].layout == b[cell].layout
 	check(same, "Same seed builds the same floor")
 
 func reachable(rooms: Dictionary) -> int:
@@ -175,8 +182,9 @@ func check_gem_and_stairs() -> void:
 	room.enter_room(exit, -1)
 	await walk_to_center()
 	await ticks(3)
-	check(room.floor_number == 2 and room.current.cell == Vector2i.ZERO, "Stairs lead to a new floor")
+	check(room.floor_number == 3 and room.current.cell == Vector2i.ZERO, "Stairs lead from floor 2 to floor 3")
 	check(room.rooms.size() == room.first_floor_rooms + 2, "Each floor down has more rooms")
+	check(room.props.get_children().filter(func(node: Node) -> bool: return node.has_node("Flame")).size() >= 2, "Rooms have animated torches")
 
 ## Holds a key only until the knight reaches another room.
 func walk_until_room_changes(keycode: Key) -> void:
@@ -188,6 +196,63 @@ func walk_until_room_changes(keycode: Key) -> void:
 			break
 	key(keycode, false)
 	await ticks(2)
+
+## The rock drags a trail behind it that is gone 20 seconds later.
+func check_trail() -> void:
+	var trail: Node2D = room.trail
+	knight.call("reset_to", room.CENTER)
+	await ticks(2)
+	var before: int = trail.current_marks().size()
+	key(KEY_D, true)
+	await ticks(10)
+	key(KEY_D, false)
+	await ticks(2)
+	check(trail.current_marks().size() > before + 5, "The rock leaves a trail (%d marks)" % trail.current_marks().size())
+	trail.clock += 18.0
+	await ticks(2)
+	check(trail.current_marks().size() > 0, "The trail is still there before 20 seconds")
+	trail.clock += 2.5
+	await ticks(2)
+	check(trail.current_marks().is_empty(), "The trail is gone after 20 seconds")
+	knight.call("set_rock", false)
+	key(KEY_A, true)
+	await ticks(10)
+	key(KEY_A, false)
+	await ticks(2)
+	check(trail.current_marks().size() <= 1, "A knight leaves no trail")
+	knight.call("set_rock", true)
+
+## Hearts, slime contact, invulnerability, potions and running out of hearts.
+func check_health() -> void:
+	var hearts: Array = room.get_node("HUD/Hearts").get_children()
+	check(hearts.size() == 3 and room.health == 3, "Health bar starts with three full hearts")
+	knight.call("reset_to", room.CENTER)
+	var slime: CharacterBody2D = room.spawn_enemy("slime", room.CENTER + Vector2(40, 0))
+	for attempt in range(60):
+		if room.health < 3:
+			break
+		await ticks(1)
+	check(room.health == 2 and knight.is_invulnerable(), "Touching a slime costs a heart")
+	await ticks(12)
+	var region: Rect2 = hearts[2].texture.region
+	check(region.position.y == room.HeartFrame.BROKEN * 128, "The lost heart shows the broken frame")
+	room.take_damage(slime.position)
+	check(room.health == 2, "No damage while blinking after a hit")
+	slime.queue_free()
+	room.heal()
+	check(room.health == 3, "Healing refills a heart")
+	for hit in range(3):
+		knight.invulnerable = 0.0
+		room.take_damage(knight.position + Vector2(10, 0))
+	for attempt in range(60):
+		if room.has_node("GameOver"):
+			break
+		await ticks(1)
+	check(room.health == 0 and room.has_node("GameOver"), "Running out of hearts shows the game over menu")
+	room.retry_floor(room.get_node("GameOver"))
+	await ticks(3)
+	check(room.health == 3 and not room.transitioning and room.floor_number == 2, "Retrying restores the hearts on the same floor")
+	check(knight.modulate.a == 1.0 and knight.is_physics_processing(), "The player can move again after retrying")
 
 func walk_to_center() -> void:
 	knight.call("reset_to", room.CENTER + Vector2(0, 96))

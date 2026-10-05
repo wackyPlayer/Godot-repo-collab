@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://b0t044mktad8b"
-path="res://.godot/imported/ornament.png-811b008d64c38e494674b2f20516bcbf.ctex"
+uid="uid://uxu3pf7glm7v"
+path="res://.godot/imported/heart_stone.png-f298465bf148987c1d2aa5396c5ef1e7.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/ornament.png"
-dest_files=["res://.godot/imported/ornament.png-811b008d64c38e494674b2f20516bcbf.ctex"]
+source_file="res://assets/heart_stone.png"
+dest_files=["res://.godot/imported/heart_stone.png-f298465bf148987c1d2aa5396c5ef1e7.ctex"]
 
 [params]
 

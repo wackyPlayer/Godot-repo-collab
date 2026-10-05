@@ -8,12 +8,15 @@ var knight: CharacterBody2D
 var failures := 0
 
 func _initialize() -> void:
+	# Default keys, whatever the player has rebound.
+	root.get_node("Settings").use_defaults()
 	call_deferred("run_checks")
 
 func run_checks() -> void:
 	room = load("res://scenes/room.tscn").instantiate()
 	room.dungeon_seed = 1234
 	room.fade_time = 0.0
+	room.enemies = false
 	root.add_child(room)
 	knight = room.get_node("Knight")
 	await ticks(3)

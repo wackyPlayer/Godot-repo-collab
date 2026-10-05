@@ -1,14 +1,55 @@
 @tool
 extends Node2D
 ## Runs the Violet Keep: draws the current room, rebuilds its walls and blocks,
-## and walks the knight between procedurally generated rooms.
+## and walks the knight between procedurally generated rooms. The keep has
+## five floors: floor 1 is the round chamber (tutorial.gd), floors 2-4 are
+## generated here, and floor 5 is the mage's sanctum with the final cutscene.
+## Winning unlocks an endless mode.
 
 const Generator := preload("res://scripts/dungeon_generator.gd")
 const STONE: Texture2D = preload("res://assets/stone.png")
 const FLOOR_TILES: Texture2D = preload("res://assets/floor_tiles.png")
 const WALL: Texture2D = preload("res://assets/wall.png")
 const BLOCK: PackedScene = preload("res://scenes/stone_block.tscn")
-const ORNAMENT: PackedScene = preload("res://scenes/ornament.tscn")
+const TORCH: PackedScene = preload("res://scenes/torch.tscn")
+const Knight := preload("res://scripts/knight.gd")
+const RockTrail := preload("res://scripts/rock_trail.gd")
+const HeadingArrow := preload("res://scripts/heading_arrow.gd")
+const ENEMY_SCENES := {
+	"slime": preload("res://scenes/slime.tscn"),
+	"skeleton": preload("res://scenes/skeleton.tscn"),
+}
+const MAGE: PackedScene = preload("res://scenes/mage.tscn")
+## Red hearts while a knight, stone hearts while a rock.
+const HEART: Texture2D = preload("res://assets/heart.png")
+const HEART_STONE: Texture2D = preload("res://assets/heart_stone.png")
+const MAX_HEALTH := 3
+## Frames of the heart sheet: a bright flash, full, emptied, and broken.
+enum HeartFrame { FLASH, FULL, EMPTY, BROKEN }
+## Enemies never spawn this close to the door the player came in by.
+const ENEMY_SAFE_DISTANCE := 192.0
+## Floor 3 is a dim red and crawling with enemies. The tints colour the room
+## itself (floor, walls, blocks), never the player, enemies or torches.
+const RED_FLOOR := 3
+const RED_TINT := Color(0.8, 0.36, 0.32)
+## Floor 4 is red as hell: a deep red that pulses, a vignette and embers.
+const HELL_TINT := Color(1.3, 0.22, 0.16)
+const HELL_TINT_BRIGHT := Color(1.6, 0.3, 0.18)
+## Floor 4 is a long maze: 20+ rooms, stairs at least 8 doors from the
+## start, and enemies as fast as the player's run, with red eyes.
+const FAST_FLOOR := 4
+const FAST_FLOOR_ROOMS := 22
+const FAST_FLOOR_EXIT_DISTANCE := 8
+const ENRAGED_SIGHT := 300.0
+## Where the mage waits in the sanctum.
+const MAGE_SPOT := CENTER - Vector2(0, 160)
+const FINALE_RANGE := 200.0
+const TUTORIAL := "res://scenes/tutorial.tscn"
+const MAIN_MENU := "res://scenes/main_menu.tscn"
+const FIRST_DUNGEON_FLOOR := 2
+const FINAL_FLOOR := 5
+## Every room has a pair of torches on the north wall; the generator adds more.
+const FIXED_TORCH_X: Array[float] = [176.0, 592.0]
 const ITEM_ART := {
 	"sword": preload("res://assets/sword.png"),
 	"potion": preload("res://assets/potion.png"),
@@ -70,11 +111,31 @@ const STAIRS := Rect2(CENTER - Vector2(TILE, TILE), Vector2(TILE * 2, TILE * 2))
 @export var dungeon_seed := 0 ## 0 rolls a new dungeon every run.
 @export var first_floor_rooms := 8
 @export var fade_time := 0.12
+## Off in movement tests, so wandering slimes cannot nudge the player.
+@export var enemies := true
 
 var generator := Generator.new()
 var rooms: Dictionary = {}
 var current: Generator.Room
-var floor_number := 1
+var floor_number := FIRST_DUNGEON_FLOOR
+## Set after beating floor 5 and choosing to keep going.
+var endless := false
+var victory_shown := false
+var rooms_explored := 0
+var health := MAX_HEALTH
+var hearts: Array[TextureRect] = []
+var floor_tint := Color.WHITE
+var hell_overlay: CanvasLayer
+var hell_pulse: Tween
+var trail: Node2D
+var finale_mage: Node2D
+var finale_started := false
+var laughing := false
+var finale_line: Label
+var finale_time := 0.0
+## Where cutscenes have panned the camera; screen shake wobbles around it.
+var camera_pan := Vector2.ZERO
+var start_msec := 0
 var inventory := {"sword": 0, "potion": 0, "bubble": 0}
 var run_seed := 0
 var entry_point := START_SPAWN
@@ -83,6 +144,7 @@ var transitioning := false
 var status_label: Label
 var progress_label: Label
 var caption_label: Label
+var fps_label: Label
 var minimap: Control
 var item_slots := {}
 var fade: ColorRect
@@ -99,18 +161,32 @@ func _ready() -> void:
 		return
 	configure_input()
 	make_interface()
+	var arrow := HeadingArrow.new()
+	arrow.name = "HeadingArrow"
+	arrow.z_index = 1
+	knight.add_child(arrow)
+	trail = RockTrail.new()
+	trail.name = "RockTrail"
+	trail.target = knight
+	add_child(trail)
 	run_seed = dungeon_seed if dungeon_seed != 0 else randi()
-	print("Violet Keep seed %d — WASD / arrows: move · Shift: run · R: back to door · Esc: quit" % run_seed)
+	print("Violet Keep seed %d" % run_seed)
 	begin()
 
 ## The dungeon is explored in rock form; tutorial.gd overrides this.
 func begin() -> void:
 	knight.call("set_rock", true)
+	refresh_hearts()
+	start_msec = Time.get_ticks_msec()
 	start_floor()
 	fade.color.a = 1.0
 	fade_to(0.0)
 
+## The Settings autoload owns the key bindings (and lets players change
+## them); these defaults only apply if a scene runs without it.
 func configure_input() -> void:
+	if get_node_or_null("/root/Settings"):
+		return
 	bind_keys("move_left", [KEY_A, KEY_LEFT])
 	bind_keys("move_right", [KEY_D, KEY_RIGHT])
 	bind_keys("move_up", [KEY_W, KEY_UP])
@@ -134,18 +210,80 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("reset") and not transitioning:
 		knight.call("reset_to", entry_point, entry_faces_left)
 	if event.is_action_pressed("quit"):
-		get_tree().quit()
+		get_tree().change_scene_to_file(MAIN_MENU)
 
 # --- Floor and room flow -----------------------------------------------------
 
 func start_floor() -> void:
-	var count := mini(first_floor_rooms + (floor_number - 1) * 2, MAX_ROOMS)
-	rooms = generator.generate(hash([run_seed, floor_number]), count)
+	apply_floor_tint()
+	trail.clear_all()
+	if is_final_floor():
+		rooms = {Vector2i.ZERO: make_sanctum()}
+	else:
+		var min_distance := FAST_FLOOR_EXIT_DISTANCE if is_fast_floor() else 0
+		rooms = generator.generate(hash([run_seed, floor_number]), floor_room_count(), min_distance)
+	if endless:
+		play_music("finale" if floor_number % 2 == 1 else "keep")
+	else:
+		play_music("finale" if is_final_floor() else "keep")
 	enter_room(Vector2i.ZERO, -1)
+
+func is_final_floor() -> bool:
+	return floor_number == FINAL_FLOOR and not endless
+
+func is_red_floor() -> bool:
+	return floor_number == RED_FLOOR and not endless
+
+func is_fast_floor() -> bool:
+	return floor_number == FAST_FLOOR and not endless
+
+func apply_floor_tint() -> void:
+	if hell_pulse:
+		hell_pulse.kill()
+		hell_pulse = null
+	hell_overlay.visible = is_fast_floor()
+	if is_fast_floor():
+		set_floor_tint(HELL_TINT)
+		hell_pulse = create_tween().set_loops()
+		hell_pulse.tween_method(set_floor_tint, HELL_TINT, HELL_TINT_BRIGHT, 1.1).set_trans(Tween.TRANS_SINE)
+		hell_pulse.tween_method(set_floor_tint, HELL_TINT_BRIGHT, HELL_TINT, 1.1).set_trans(Tween.TRANS_SINE)
+	else:
+		set_floor_tint(RED_TINT if is_red_floor() else Color.WHITE)
+
+## Tints the room's own drawing, its blocks and its front walls.
+func set_floor_tint(color: Color) -> void:
+	floor_tint = color
+	self_modulate = color
+	blocks.modulate = color
+	front_walls.modulate = color
+
+func floor_room_count() -> int:
+	if endless:
+		return mini(first_floor_rooms + (floor_number - FINAL_FLOOR) * 2, MAX_ROOMS)
+	if is_fast_floor():
+		return FAST_FLOOR_ROOMS
+	return first_floor_rooms + (floor_number - FIRST_DUNGEON_FLOOR) * 2
+
+## Floor 5 is a single hall: no doors, no enemies, just the mage.
+func make_sanctum() -> Generator.Room:
+	var sanctum := Generator.Room.new()
+	sanctum.kind = "final"
+	sanctum.layout = "The Sanctum"
+	sanctum.tiled_floor = true
+	sanctum.blocks.assign([Vector2i(4, 5), Vector2i(15, 5), Vector2i(4, 10), Vector2i(15, 10), Vector2i(4, 15), Vector2i(15, 15)])
+	sanctum.torches.assign([0, 7, 12, 19])
+	return sanctum
+
+func play_music(track: String) -> void:
+	var music := get_node_or_null("/root/Music")
+	if music:
+		music.call("play", track)
 
 ## `via` is the door the knight arrives through, or -1 for the floor's start.
 func enter_room(cell: Vector2i, via: int) -> void:
 	current = rooms[cell]
+	if not current.visited:
+		rooms_explored += 1
 	current.visited = true
 	for direction in range(4):
 		if current.doors[direction]:
@@ -155,6 +293,8 @@ func enter_room(cell: Vector2i, via: int) -> void:
 	entry_point = START_SPAWN if via < 0 else DOOR_SPAWNS[via]
 	entry_faces_left = via == Generator.EAST
 	knight.call("reset_to", entry_point, entry_faces_left)
+	if trail:
+		trail.show_room(cell)
 	rebuild()
 	queue_redraw()
 	front_walls.queue_redraw()
@@ -204,16 +344,35 @@ func _on_item_entered(body: Node2D, pickup: Area2D) -> void:
 		return
 	current.item_taken = true
 	inventory[current.item] += 1
+	if current.item == "potion":
+		heal()
 	pickup.queue_free()
 	update_hud()
 
 # --- Building the room ------------------------------------------------------
 
 func rebuild() -> void:
+	clear_room()
+	build_walls()
+	place_blocks()
+	place_torches()
+	if current.kind == "exit":
+		make_area(STAIRS.grow(-12), props).body_entered.connect(_on_stairs_entered)
+	if current.kind == "treasure" and not current.item_taken:
+		make_item()
+	if current.kind == "final" and not finale_started:
+		finale_mage = MAGE.instantiate()
+		finale_mage.position = MAGE_SPOT
+		blocks.add_child(finale_mage)
+	spawn_enemies()
+
+func clear_room() -> void:
 	for container: Node in [boundaries, blocks, props]:
 		for child in container.get_children():
 			container.remove_child(child)
 			child.queue_free()
+
+func build_walls() -> void:
 	for direction in range(4):
 		if current.doors[direction]:
 			for part in split_wall(WALLS[direction], DOOR_GAPS[direction], direction % 2 == 0):
@@ -224,6 +383,8 @@ func rebuild() -> void:
 			make_area(DOOR_TRIGGERS[direction], boundaries).body_entered.connect(_on_door_entered.bind(direction))
 		else:
 			make_wall(WALLS[direction])
+
+func place_blocks() -> void:
 	var solid := {}
 	for cell in current.blocks:
 		solid[cell] = true
@@ -237,14 +398,65 @@ func rebuild() -> void:
 				mask |= 1 << direction
 		block.set("neighbours", mask)
 		blocks.add_child(block)
-	for cell in current.ornaments:
-		var ornament: Node2D = ORNAMENT.instantiate()
-		ornament.position = INTERIOR + Vector2(cell) * TILE + Vector2(TILE / 2, TILE - 6)
-		blocks.add_child(ornament)
-	if current.kind == "exit":
-		make_area(STAIRS.grow(-12), props).body_entered.connect(_on_stairs_entered)
-	if current.kind == "treasure" and not current.item_taken:
-		make_item()
+
+## Torches hang on the north wall face, behind anything standing in the room.
+func place_torches() -> void:
+	var xs: Array[float] = FIXED_TORCH_X.duplicate()
+	for column in current.torches:
+		xs.append(INTERIOR.x + column * TILE + TILE / 2.0)
+	for x in xs:
+		make_torch(Vector2(x, INTERIOR.y - 2))
+
+## Slimes and skeletons. The same room always gets the same spawn points.
+func spawn_enemies() -> void:
+	if not enemies or current.kind not in ["normal", "exit"]:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([run_seed, floor_number, current.cell])
+	var count := enemy_count(rng)
+	var blocked := {}
+	for cell in current.blocks:
+		blocked[cell] = true
+	for cell in Generator.required_floor(current):
+		blocked[cell] = true
+	for attempt in range(count * 12):
+		if count <= 0:
+			return
+		var cell := Vector2i(rng.randi_range(1, Generator.COLS - 2), rng.randi_range(1, Generator.ROWS - 2))
+		var at := INTERIOR + Vector2(cell) * TILE + Vector2(TILE / 2, TILE - 4)
+		if blocked.has(cell) or at.distance_to(entry_point) < ENEMY_SAFE_DISTANCE:
+			continue
+		blocked[cell] = true
+		spawn_enemy("skeleton" if rng.randf() < 0.45 else "slime", at)
+		count -= 1
+
+func enemy_count(rng: RandomNumberGenerator) -> int:
+	if endless:
+		return clampi(3 + (floor_number - FINAL_FLOOR) / 2 + rng.randi_range(0, 1), 3, 7)
+	match floor_number:
+		2:
+			return rng.randi_range(2, 3)
+		RED_FLOOR:
+			return rng.randi_range(5, 7)
+		FAST_FLOOR:
+			return rng.randi_range(3, 4)
+	return 0
+
+func spawn_enemy(kind: String, at: Vector2) -> CharacterBody2D:
+	var enemy: CharacterBody2D = ENEMY_SCENES[kind].instantiate()
+	enemy.position = at
+	enemy.set("target", knight)
+	enemy.connect("touched", take_damage)
+	if is_fast_floor():
+		enemy.call("enrage", Knight.RUN_SPEED, ENRAGED_SIGHT)
+	props.add_child(enemy)
+	return enemy
+
+func make_torch(at: Vector2) -> Node2D:
+	var torch: Node2D = TORCH.instantiate()
+	torch.position = at
+	props.add_child(torch)
+	return torch
 
 static func split_wall(wall: Rect2, gap: Rect2, horizontal: bool) -> Array[Rect2]:
 	if horizontal:
@@ -328,9 +540,36 @@ func make_interface() -> void:
 	make_label(hud, "THE VIOLET KEEP", Vector2(32, 19), 21, Color("e1d6fb"))
 	status_label = make_label(hud, "", Vector2(236, 18), 12, ACCENT)
 	progress_label = make_label(hud, "", Vector2(236, 35), 10, Color("8a7cab"))
-	make_label(hud, "WASD / ARROWS  move     SHIFT  run", Vector2(32, 466), 13, Color("c5bdd8"))
-	make_label(hud, "R  back to door     ESC  quit", Vector2(530, 466), 13, Color("9284b1"))
-	caption_label = make_label(hud, "", Vector2(32, 491), 10, Color("75678e"))
+	make_label(hud, controls_hint(), Vector2(32, 466), 13, Color("c5bdd8"))
+	var right := make_label(hud, "%s  back to door     Esc  menu" % key_hint("reset", "R"), Vector2(400, 466), 13, Color("9284b1"))
+	right.size.x = 336
+	right.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	fps_label = make_label(hud, "FPS --", Vector2(32, 491), 10, Color("9284b1"))
+	caption_label = make_label(hud, "", Vector2(96, 491), 10, Color("75678e"))
+	var fps_timer := Timer.new()
+	fps_timer.wait_time = 0.25
+	fps_timer.autostart = true
+	fps_timer.timeout.connect(func() -> void: fps_label.text = "FPS %d" % Engine.get_frames_per_second())
+	hud.add_child(fps_timer)
+	# The health bar sits over the top-left corner of the view.
+	make_hell_overlay()
+	var heart_row := HBoxContainer.new()
+	heart_row.name = "Hearts"
+	heart_row.position = Vector2(14, 66)
+	heart_row.add_theme_constant_override("separation", 2)
+	heart_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(heart_row)
+	for index in range(MAX_HEALTH):
+		var heart := TextureRect.new()
+		var frame := AtlasTexture.new()
+		frame.atlas = HEART
+		heart.texture = frame
+		heart.custom_minimum_size = Vector2(32, 32)
+		heart.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		heart.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		heart_row.add_child(heart)
+		hearts.append(heart)
+		set_heart_frame(index, HeartFrame.FULL)
 	var slots := HBoxContainer.new()
 	slots.position = Vector2(440, 14)
 	slots.add_theme_constant_override("separation", 6)
@@ -352,6 +591,141 @@ func make_interface() -> void:
 	minimap.draw.connect(draw_minimap)
 	hud.add_child(minimap)
 
+## Floor 4's screen dressing: red edges and embers rising from below. It sits
+## under the HUD and the fade curtain, and is hidden on every other floor.
+func make_hell_overlay() -> void:
+	hell_overlay = CanvasLayer.new()
+	hell_overlay.name = "HellOverlay"
+	hell_overlay.layer = 4
+	hell_overlay.visible = false
+	add_child(hell_overlay)
+	var gradient := Gradient.new()
+	gradient.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
+	gradient.colors = PackedColorArray([Color(0.6, 0.0, 0.0, 0.0), Color(0.6, 0.0, 0.0, 0.0), Color(0.55, 0.0, 0.02, 0.6)])
+	var texture := GradientTexture2D.new()
+	texture.gradient = gradient
+	texture.fill = GradientTexture2D.FILL_RADIAL
+	texture.fill_from = Vector2(0.5, 0.5)
+	texture.fill_to = Vector2(1.05, 0.5)
+	var vignette := TextureRect.new()
+	vignette.texture = texture
+	vignette.size = Vector2(768, 512)
+	vignette.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hell_overlay.add_child(vignette)
+	var embers := CPUParticles2D.new()
+	embers.position = Vector2(384, 470)
+	embers.amount = 48
+	embers.lifetime = 4.5
+	embers.preprocess = 4.5
+	embers.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	embers.emission_rect_extents = Vector2(400, 8)
+	embers.direction = Vector2.UP
+	embers.spread = 25.0
+	embers.gravity = Vector2(0, -12)
+	embers.initial_velocity_min = 25.0
+	embers.initial_velocity_max = 70.0
+	embers.scale_amount_min = 1.5
+	embers.scale_amount_max = 3.0
+	var ramp := Gradient.new()
+	ramp.colors = PackedColorArray([Color(1.0, 0.75, 0.3, 0.95), Color(1.0, 0.15, 0.05, 0.0)])
+	embers.color_ramp = ramp
+	hell_overlay.add_child(embers)
+
+# --- Health ------------------------------------------------------------------
+
+func set_heart_frame(index: int, frame: HeartFrame) -> void:
+	var atlas := hearts[index].texture as AtlasTexture
+	atlas.atlas = HEART_STONE if knight.get("rock") else HEART
+	var size := atlas.atlas.get_width()
+	atlas.region = Rect2(0, frame * size, size, size)
+
+## Redraws every heart, e.g. after the knight turns to stone.
+func refresh_hearts() -> void:
+	for index in range(MAX_HEALTH):
+		set_heart_frame(index, HeartFrame.FULL if index < health else HeartFrame.BROKEN)
+
+## Steps one heart through a few frames of the sheet.
+func animate_heart(index: int, frames: Array, step := 0.07) -> void:
+	var tween := hearts[index].create_tween()
+	for frame: HeartFrame in frames:
+		tween.tween_callback(set_heart_frame.bind(index, frame))
+		tween.tween_interval(step)
+
+## Called by anything that hurts the player, with where the hurt came from.
+func take_damage(from: Vector2) -> void:
+	if transitioning or health <= 0 or knight.call("is_invulnerable"):
+		return
+	health -= 1
+	knight.call("hurt", from)
+	# The lost heart flashes, empties and cracks.
+	animate_heart(health, [HeartFrame.FLASH, HeartFrame.FULL, HeartFrame.FLASH, HeartFrame.EMPTY, HeartFrame.BROKEN])
+	if health == 0:
+		game_over()
+
+func heal() -> void:
+	if health >= MAX_HEALTH:
+		return
+	animate_heart(health, [HeartFrame.FLASH, HeartFrame.FULL])
+	health += 1
+
+func restore_health() -> void:
+	health = MAX_HEALTH
+	for index in range(MAX_HEALTH):
+		set_heart_frame(index, HeartFrame.FULL)
+
+func game_over() -> void:
+	transitioning = true
+	knight.set_physics_process(false)
+	knight.velocity = Vector2.ZERO
+	burst(knight.position + Vector2(0, -10), Color("8f86a8"), 18)
+	var crumble := knight.create_tween()
+	crumble.tween_property(knight, "modulate:a", 0.0, 0.5)
+	await crumble.finished
+	var where := "floor %d" % floor_number
+	show_menu("GameOver", "YOU CRUMBLED", [
+		"Out of hearts on %s." % where,
+		"%d rooms explored" % rooms_explored,
+	], [
+		["Try %s again" % where, retry_floor],
+		["Back to the round chamber", func() -> void: get_tree().change_scene_to_file(TUTORIAL)],
+		["Main menu", func() -> void: get_tree().change_scene_to_file(MAIN_MENU)],
+	])
+
+## Rebuilds the same floor (same seed, same layout) with full hearts.
+func retry_floor(layer: CanvasLayer) -> void:
+	layer.queue_free()
+	await fade_to(1.0)
+	restore_health()
+	knight.modulate.a = 1.0
+	start_floor()
+	await fade_to(0.0)
+	knight.set_physics_process(true)
+	transitioning = false
+
+## The first key bound to an action, as the player set it in Settings.
+func key_hint(action: String, fallback: String) -> String:
+	var settings := get_node_or_null("/root/Settings")
+	return settings.call("first_key", action) if settings else fallback
+
+## The bottom-left reminder: brain signals when the headset is in use.
+func controls_hint() -> String:
+	var settings := get_node_or_null("/root/Settings")
+	if settings and settings.brain_enabled:
+		return settings.brain_hint()
+	return "%s  move     %s  run" % [move_keys_text(), key_hint("sprint", "Shift")]
+
+## Tutorial wording for an action: the brain signal if the headset is on.
+func brain_signal_for(action: String) -> String:
+	var settings := get_node_or_null("/root/Settings")
+	if settings and settings.brain_enabled:
+		return settings.signal_doing(action)
+	return ""
+
+func move_keys_text() -> String:
+	return "/".join(["move_up", "move_left", "move_down", "move_right"].map(
+		func(action: String) -> String: return key_hint(action, "WASD"[["move_up", "move_left", "move_down", "move_right"].find(action)])))
+
 func make_label(parent: Node, caption: String, at: Vector2, size: int, color: Color) -> Label:
 	var label := Label.new()
 	label.text = caption
@@ -367,16 +741,31 @@ func update_hud() -> void:
 	for room: Generator.Room in rooms.values():
 		if room.visited:
 			explored += 1
-	status_label.text = "FLOOR %d  /  %s" % [floor_number, current.layout.to_upper()]
+	var floor_text := "FLOOR %d  /  ENDLESS" % floor_number if endless else "FLOOR %d OF %d" % [floor_number, FINAL_FLOOR]
+	status_label.text = "%s  /  %s" % [floor_text, current.layout.to_upper()]
 	progress_label.text = "%d OF %d ROOMS EXPLORED" % [explored, rooms.size()]
 	for item: String in item_slots:
 		# Items not found yet show as dark silhouettes.
 		item_slots[item].modulate = Color.WHITE if inventory[item] > 0 else Color(0.3, 0.25, 0.45, 0.55)
 	match current.kind:
 		"start":
-			caption_label.text = "Stone, but still moving. Somewhere below, the curse can be broken." if floor_number == 1 else "Floor %d. The stairs sealed behind you." % floor_number
+			if endless:
+				caption_label.text = "The endless depths, floor %d. How far down does the keep go?" % floor_number
+			elif floor_number == FIRST_DUNGEON_FLOOR:
+				caption_label.text = "Stone, but still moving. Slimes and skeletons roam these halls."
+			elif is_red_floor():
+				caption_label.text = "The keep runs red. Every room is crawling."
+			elif is_fast_floor():
+				caption_label.text = "Their eyes burn red and they run as fast as you. The stairs are far."
+			else:
+				caption_label.text = "Floor %d. The stairs sealed behind you." % floor_number
 		"exit":
-			caption_label.text = "Stairs spiral down into the dark. Step on them to descend."
+			if floor_number == FINAL_FLOOR - 1 and not endless:
+				caption_label.text = "These stairs lead down to the mage's sanctum."
+			else:
+				caption_label.text = "Stairs spiral down into the dark. Step on them to descend."
+		"final":
+			caption_label.text = "" if finale_started else "The mage waits at the end of the hall."
 		"treasure":
 			caption_label.text = "Something glints here." if not current.item_taken else "You found %s." % ITEM_NAMES[current.item]
 		_:
@@ -477,11 +866,8 @@ func _draw() -> void:
 			draw_compass(Color("2f6a68"))
 		"exit":
 			draw_stairs()
-	for x in [176, 592]:
-		draw_rect(Rect2(x - 6, 84, 12, 12), Color("19122c"))
-		draw_rect(Rect2(x - 4, 77, 8, 9), Color("6f459b"))
-		draw_rect(Rect2(x - 2, 75, 4, 8), Color("c5b2ff"))
-		draw_rect(Rect2(x - 1, 77, 2, 4), Color("f0e5ff"))
+		"final":
+			draw_sanctum()
 
 ## The side and south walls cover sprites outside the room. The upper side
 ## door jambs are separate Y-sorted pieces so they do not cover a head when
@@ -609,3 +995,183 @@ func draw_stairs() -> void:
 		draw_rect(Rect2(strip.position, Vector2(strip.size.x, 2)), Color(0.8, 0.7, 1.0, shade * 0.6))
 		draw_rect(Rect2(strip.position + Vector2(0, 10), Vector2(strip.size.x, 2)), Color(0, 0, 0.02, 0.8))
 	draw_rect(STAIRS.grow(4), ACCENT, false, 1.0)
+
+## A runner from the entrance to the mage's rune circle.
+func draw_sanctum() -> void:
+	var runner := Rect2(CENTER.x - 16, MAGE_SPOT.y + 60, 32, START_SPAWN.y - MAGE_SPOT.y - 40)
+	draw_rect(runner, Color("241536"))
+	draw_rect(Rect2(runner.position, Vector2(2, runner.size.y)), Color("6f459b"))
+	draw_rect(Rect2(runner.end.x - 2, runner.position.y, 2, runner.size.y), Color("6f459b"))
+	draw_circle(MAGE_SPOT, 64, Color("0b0818"))
+	draw_arc(MAGE_SPOT, 64, 0, TAU, 96, ACCENT, 2.0)
+	draw_arc(MAGE_SPOT, 50, 0, TAU, 96, Color("6f459b"), 2.0)
+	for start in [-PI / 2, PI / 2]:
+		var points := PackedVector2Array()
+		for corner in range(4):
+			points.append(MAGE_SPOT + Vector2.from_angle(start + TAU * corner / 3.0) * 50)
+		draw_polyline(points, Color("c5b2ff"), 1.0)
+
+# --- Ending -----------------------------------------------------------------
+
+func _process(delta: float) -> void:
+	if Engine.is_editor_hint() or not is_instance_valid(finale_mage):
+		return
+	var sprite: Sprite2D = finale_mage.get_node("Sprite")
+	# The art faces left; it turns to watch the rock. Laughing shakes it.
+	sprite.flip_h = knight.position.x > finale_mage.position.x + 4.0
+	finale_time += delta * (10.0 if laughing else 2.0)
+	sprite.frame = int(finale_time) % 2
+	sprite.position.y = -2.0 * sprite.scale.y if laughing and int(finale_time) % 2 == 0 else 0.0
+	if not finale_started and knight.position.distance_to(finale_mage.position) < FINALE_RANGE:
+		play_finale()
+
+## The final cutscene: the mage gloats, laughs, and leaves the player a rock.
+func play_finale() -> void:
+	finale_started = true
+	transitioning = true
+	knight.set_physics_process(false)
+	knight.velocity = Vector2.ZERO
+	knight.call("face", knight.position.x > finale_mage.position.x)
+	update_hud()
+	# The mage is tall: frame the shot between the two of them.
+	await pan_camera((finale_mage.position - knight.position) / 2.0 + Vector2(0, -30))
+	# Subtitles sit low on screen, clear of the HUD and the mage.
+	finale_line = make_label($HUD, "", Vector2(0, 404), 15, Color("f0e5ff"))
+	finale_line.size = Vector2(768, 24)
+	finale_line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	finale_line.add_theme_constant_override("outline_size", 6)
+	finale_line.add_theme_color_override("font_outline_color", Color("07050f"))
+	await mage_says("So the little rock rolled all the way down here.", 2.2)
+	await mage_says("You came for a cure? There is no cure. There never was.", 2.6)
+	await laugh(1.8)
+	await mage_says("You'll be a rock... FOREVER!", 2.0)
+	await laugh(2.2)
+	finale_line.text = ""
+	burst(finale_mage.position + Vector2(0, -42), Color("c5b2ff"), 18)
+	var leave := finale_mage.create_tween()
+	leave.tween_property(finale_mage, "modulate:a", 0.0, 0.4)
+	await leave.finished
+	finale_mage.queue_free()
+	await wait(1.0)
+	await fade_to(1.0)
+	show_victory()
+
+func mage_says(line: String, seconds: float) -> void:
+	finale_line.text = line
+	await wait(seconds)
+
+## "HA HA HA" with the mage bouncing and the camera shaking.
+func laugh(seconds: float) -> void:
+	laughing = true
+	finale_line.text = "HA HA HA HA HA!"
+	var camera: Camera2D = knight.get_node_or_null("Camera2D")
+	var elapsed := 0.0
+	while elapsed < seconds:
+		if camera:
+			camera.offset = camera_pan + Vector2(randf_range(-3, 3), randf_range(-3, 3))
+		await wait(0.05)
+		elapsed += 0.05
+	if camera:
+		camera.offset = camera_pan
+	laughing = false
+
+## Slides the player's camera to an offset (Vector2.ZERO recentres it).
+func pan_camera(offset: Vector2, seconds := 0.6) -> void:
+	camera_pan = offset
+	var camera: Camera2D = knight.get_node_or_null("Camera2D")
+	if not camera:
+		return
+	var tween := camera.create_tween()
+	tween.tween_property(camera, "offset", offset, seconds).set_trans(Tween.TRANS_SINE)
+	await tween.finished
+
+func wait(seconds: float) -> void:
+	await get_tree().create_timer(seconds).timeout
+
+func show_victory() -> void:
+	victory_shown = true
+	var seconds := (Time.get_ticks_msec() - start_msec) / 1000
+	var found := 0
+	for count: int in inventory.values():
+		found += count
+	show_menu("Victory", "YOU WIN", [
+		"You reached the bottom of the Violet Keep... and you are still a rock. Forever.",
+		"%d:%02d in the keep  /  %d rooms explored  /  %d items found" % [seconds / 60, seconds % 60, rooms_explored, found],
+	], [
+		["Keep going: endless mode (still a rock)", continue_endless],
+		["Play again from the start", func() -> void: get_tree().change_scene_to_file(TUTORIAL)],
+		["Main menu", func() -> void: get_tree().change_scene_to_file(MAIN_MENU)],
+	])
+
+## A dimmed full-screen panel with a title, lines of text and buttons. The
+## first choice's callable receives the menu's layer so it can close it.
+func show_menu(layer_name: String, title: String, lines: Array, choices: Array) -> void:
+	var layer := CanvasLayer.new()
+	layer.name = layer_name
+	layer.layer = 20
+	add_child(layer)
+	var shade := ColorRect.new()
+	shade.color = Color(0.02, 0.015, 0.05, 0.85)
+	shade.size = Vector2(768, 512)
+	layer.add_child(shade)
+	var box := VBoxContainer.new()
+	box.position = Vector2(164, 116)
+	box.size = Vector2(440, 280)
+	box.add_theme_constant_override("separation", 12)
+	layer.add_child(box)
+	var heading := make_label(box, title, Vector2.ZERO, 26, Color("e1d6fb"))
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	for index in range(lines.size()):
+		var label := make_label(box, lines[index], Vector2.ZERO, 12 if index == 0 else 11, ACCENT if index == 0 else Color("8a7cab"))
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var buttons: Array[Button] = []
+	for index in range(choices.size()):
+		var button := make_button(choices[index][0])
+		var action: Callable = choices[index][1]
+		button.pressed.connect(action.bind(layer) if index == 0 else action)
+		box.add_child(button)
+		buttons.append(button)
+	buttons[0].grab_focus()
+
+func make_button(caption: String) -> Button:
+	var button := Button.new()
+	button.text = caption
+	button.custom_minimum_size = Vector2(0, 30)
+	button.add_theme_font_size_override("font_size", 13)
+	button.add_theme_color_override("font_color", Color("c5bdd8"))
+	button.add_theme_color_override("font_focus_color", Color("f0e5ff"))
+	button.add_theme_color_override("font_hover_color", Color("f0e5ff"))
+	for state in ["normal", "hover", "focus", "pressed"]:
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color("1a1430") if state == "normal" else Color("2d2350")
+		style.border_color = ACCENT if state != "normal" else Color("3d3158")
+		style.set_border_width_all(1)
+		button.add_theme_stylebox_override(state, style)
+	return button
+
+func continue_endless(layer: CanvasLayer) -> void:
+	layer.queue_free()
+	endless = true
+	pan_camera(Vector2.ZERO, 0.0)
+	await fade_to(1.0)
+	floor_number += 1
+	start_floor()
+	await fade_to(0.0)
+	knight.set_physics_process(true)
+	transitioning = false
+
+## Little squares that fly out and fade, for dust and magic.
+func burst(at: Vector2, color: Color, count: int) -> void:
+	for index in range(count):
+		var bit := ColorRect.new()
+		bit.size = Vector2(2, 2)
+		bit.color = color
+		bit.position = at
+		bit.z_index = 2
+		add_child(bit)
+		var angle := TAU * index / count
+		var fly := bit.create_tween()
+		fly.set_parallel()
+		fly.tween_property(bit, "position", at + Vector2.from_angle(angle) * randf_range(10, 22), 0.45).set_ease(Tween.EASE_OUT)
+		fly.tween_property(bit, "modulate:a", 0.0, 0.45)
+		fly.chain().tween_callback(bit.queue_free)

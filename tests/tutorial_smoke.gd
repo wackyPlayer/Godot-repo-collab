@@ -7,6 +7,8 @@ var tutorial: Node2D
 var knight: CharacterBody2D
 
 func _initialize() -> void:
+	# Default keys, whatever the player has rebound.
+	root.get_node("Settings").use_defaults()
 	call_deferred("run_checks")
 
 func run_checks() -> void:
@@ -20,9 +22,18 @@ func run_checks() -> void:
 	check(camera.is_current() and camera.zoom == Vector2.ONE, "Prologue uses the player camera at normal zoom")
 	check(not knight.rock and tutorial.step == tutorial.Step.WALK, "Prologue starts as a knight with the walking lesson")
 	check(not tutorial.current.doors[0], "North door starts sealed")
+	check(tutorial.mage_sprite.scale.x >= 3.0, "The mage is drawn big")
+	var red_heart: AtlasTexture = tutorial.get_node("HUD/Hearts").get_child(0).texture
+	check(red_heart.atlas.resource_path.ends_with("heart.png"), "A knight has red hearts")
+	check(tutorial.status_label.text.begins_with("FLOOR 1 OF 5"), "The round chamber is floor 1 of 5")
+	check(tutorial.props.get_child_count() == tutorial.TORCH_ANGLES.size(), "Torches line the chamber wall")
+	await hold([KEY_A], 60)
+	check(knight.position.distance_to(tutorial.CENTER) < tutorial.RING_INNER, "The round wall keeps the knight inside")
+	knight.call("reset_to", tutorial.SPAWN)
+	tutorial.walked = 0.0
 	await hold([KEY_D], 12)
 	check(tutorial.step == tutorial.Step.RUN, "Walking finishes the first lesson")
-	knight.call("reset_to", Vector2(200, 300))
+	knight.call("reset_to", Vector2(220, 450))
 	await hold([KEY_D, KEY_SHIFT], 12)
 	check(tutorial.step == tutorial.Step.APPROACH, "Running finishes the second lesson")
 	knight.call("reset_to", Vector2(384, 300))
@@ -35,8 +46,10 @@ func run_checks() -> void:
 	check(tutorial.step == tutorial.Step.ESCAPE, "Curse scene plays through")
 	check(knight.rock and knight.get_node("KnightSprite").texture.resource_path.ends_with("knight_rock.png"), "The knight is now a rock")
 	check(not is_instance_valid(tutorial.mage), "The mage vanishes")
+	var heart: AtlasTexture = tutorial.get_node("HUD/Hearts").get_child(0).texture
+	check(heart.atlas.resource_path.ends_with("heart_stone.png"), "Hearts turn to stone with the knight")
 	check(tutorial.current.doors[0], "North door opens")
-	knight.call("reset_to", tutorial.DOOR_SPAWNS[0])
+	knight.call("reset_to", tutorial.CENTER - Vector2(0, tutorial.RING_INNER - 30))
 	await hold([KEY_W], 20)
 	check(tutorial.left, "Walking through the north door leaves for the dungeon")
 	await ticks(3)

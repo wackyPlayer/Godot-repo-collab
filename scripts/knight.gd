@@ -12,12 +12,18 @@ const RUN_SPEED := 210.0
 ## to keep them over the collider whichever way the knight faces.
 const SPRITE_SHIFT := 5.0
 const ROCK_SHIFT := 3.0
+## After a hit: a shove away from the danger, then a moment of blinking safety.
+const KNOCKBACK := 260.0
+const KNOCKBACK_DECAY := 900.0
+const INVULNERABLE_TIME := 1.2
 
 @onready var sprite: Sprite2D = $KnightSprite
 @onready var camera: Camera2D = $Camera2D
 var animation_time := 0.0
 var was_moving := false
 var rock := false
+var knockback := Vector2.ZERO
+var invulnerable := 0.0
 
 func _ready() -> void:
 	motion_mode = CharacterBody2D.MOTION_MODE_FLOATING
@@ -26,8 +32,14 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	var direction := Input.get_vector("move_left", "move_right", "move_up", "move_down")
 	var running := Input.is_action_pressed("sprint")
-	velocity = direction * (RUN_SPEED if running else WALK_SPEED)
+	velocity = direction * (RUN_SPEED if running else WALK_SPEED) + knockback
+	knockback = knockback.move_toward(Vector2.ZERO, KNOCKBACK_DECAY * delta)
 	move_and_slide()
+	if invulnerable > 0.0:
+		invulnerable -= delta
+		sprite.modulate.a = 0.35 if fmod(invulnerable, 0.16) < 0.07 else 1.0
+	else:
+		sprite.modulate.a = 1.0
 	# Actual motion makes the knight idle when pushing directly into a wall.
 	var moving := get_position_delta().length_squared() > 0.001
 	if direction.x != 0.0:
@@ -55,9 +67,19 @@ func set_rock(value: bool) -> void:
 	sprite.texture = sheet(was_moving)
 	face(sprite.flip_h)
 
+func hurt(from: Vector2) -> void:
+	knockback = from.direction_to(position) * KNOCKBACK
+	invulnerable = INVULNERABLE_TIME
+
+func is_invulnerable() -> bool:
+	return invulnerable > 0.0
+
 func reset_to(spawn: Vector2, face_left := false) -> void:
 	position = spawn
 	velocity = Vector2.ZERO
+	knockback = Vector2.ZERO
+	invulnerable = 0.0
+	sprite.modulate.a = 1.0
 	animation_time = 0.0
 	was_moving = false
 	sprite.texture = sheet(false)
