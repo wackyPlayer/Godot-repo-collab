@@ -97,6 +97,18 @@ func run_checks() -> void:
 	settings.brain_enabled = false
 	settings.apply()
 	check(not brain.is_listening() and brain.status == "Off", "Turning the link off closes the port")
+	# A detector saying hello turns the link on by itself.
+	var heading_before: int = brain.heading
+	await command("BLINK")
+	check(not settings.brain_enabled and brain.heading == heading_before, "Signals are ignored while the link is off")
+	await command("HELLO BLINK SHAKE NOD")
+	check(settings.brain_enabled and brain.is_listening() and brain.status.begins_with("Headset connected (Blink, Head shake, Nod)"), "A detector's hello turns the link on")
+	check(settings.brain_hint().contains("Nod") and not settings.brain_hint().contains("Close mouth"), "Hints only name the signals the detector sends")
+	check(settings.signal_doing("go") == "Head shake", "Tutorial wording uses the detector's signals")
+	settings.brain_enabled = false
+	settings.apply()
+	await command("HELLO BLINK SHAKE NOD")
+	check(not settings.brain_enabled, "Later hellos respect turning the link off")
 	menu.queue_free()
 	await process_frame
 
@@ -109,6 +121,10 @@ func run_checks() -> void:
 func command(word: String) -> void:
 	brain.send_test(word)
 	await wait(0.1)
+	# Input events the link sends are flushed on a later frame; right after
+	# start-up 0.1 s can pass within a single frame.
+	await process_frame
+	await process_frame
 
 func wait(seconds: float) -> void:
 	await create_timer(seconds).timeout

@@ -8,3 +8,4 @@
 *.import text eol=lf
 *.md text eol=lf
 *.png binary
+*.bat text eol=crlf

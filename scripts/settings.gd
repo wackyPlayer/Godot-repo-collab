@@ -186,10 +186,18 @@ func action_label(action: String) -> String:
 			return pair[1]
 	return action
 
+## The signals hints should mention: the ones the connected detector said
+## it sends, or all of them.
+func hint_signals() -> Array:
+	var brain := get_node_or_null("/root/BrainLink")
+	if brain and brain.detector_connected() and not brain.detector_signals.is_empty():
+		return SIGNALS.filter(func(row: Dictionary) -> bool: return row.signal in brain.detector_signals)
+	return SIGNALS
+
 ## "Blink: turn   Close mouth: go / stop   ..." for the in-game HUD.
 func brain_hint() -> String:
 	var parts: Array[String] = []
-	for row in SIGNALS:
+	for row in hint_signals():
 		var action: String = signal_actions[row.signal]
 		if action != "none":
 			parts.append("%s  %s" % [row.label, action_label(action).to_lower()])
@@ -199,7 +207,7 @@ func brain_hint() -> String:
 ## "Close mouth or Head shake" for "go", or "".
 func signal_doing(action: String) -> String:
 	var labels: Array[String] = []
-	for row in SIGNALS:
+	for row in hint_signals():
 		if signal_actions[row.signal] == action:
 			labels.append(row.label)
 	return " or ".join(labels)

@@ -14,15 +14,27 @@ extends Node
 ##   drink - drink a potion (if you carry one)
 ## In menus, a blink moves to the next button and a closed mouth, head shake
 ## or nod presses it.
+##
+## A detector can also say "HELLO BLINK SHAKE NOD" every second. While the
+## link is off it still listens on this computer for that, and the first
+## hello turns it on, so starting the detector is all the set-up needed.
+## Hints then only mention the signals the detector named.
 ## tools/send_brain_command.py sends test signals without a headset.
 
 signal signal_received(signal_name: String, action: String)
 
 const HEADINGS := ["move_up", "move_right", "move_down", "move_left"]
 const HEADING_VECTORS: Array[Vector2] = [Vector2.UP, Vector2.RIGHT, Vector2.DOWN, Vector2.LEFT]
+## A detector counts as connected this long after its last hello.
+const HELLO_TIMEOUT_MSEC := 3000
 
 var peer := PacketPeerUDP.new()
 var status := "Off"
+## The port status without the detector ("Listening on UDP port 1000").
+var port_status := "Off"
+## The signals the connected detector said it sends, and when it last said so.
+var detector_signals: Array[String] = []
+var last_hello_msec := -1
 var heading := 0
 var moving := false
 var running := false
@@ -44,35 +56,76 @@ func _ready() -> void:
 func restart() -> void:
 	release_all()
 	peer.close()
+	var settings := get_node_or_null("/root/Settings")
+	var port: int = settings.brain_port if settings else 1000
 	if not enabled():
-		status = "Off"
-		return
-	var port: int = get_node("/root/Settings").brain_port
-	if peer.bind(port, "*") == OK:
-		status = "Listening on UDP port %d" % port
+		# Only this computer, so it never asks for a firewall exception.
+		peer.bind(port, "127.0.0.1")
+		port_status = "Off"
+	elif peer.bind(port, "*") == OK:
+		port_status = "Listening on UDP port %d" % port
 	else:
-		status = "Could not open UDP port %d (is another program using it?)" % port
+		port_status = "Could not open UDP port %d (is another program using it?)" % port
+	update_status()
 
 func enabled() -> bool:
 	var settings := get_node_or_null("/root/Settings")
 	return settings != null and settings.brain_enabled
 
+## On and receiving signals (while off it only listens for a hello).
 func is_listening() -> bool:
-	return peer.is_bound()
+	return enabled() and peer.is_bound()
+
+func detector_connected() -> bool:
+	return last_hello_msec >= 0 and Time.get_ticks_msec() - last_hello_msec < HELLO_TIMEOUT_MSEC
 
 func heading_vector() -> Vector2:
 	return HEADING_VECTORS[heading]
 
 func _process(_delta: float) -> void:
+	# Read everything first: turning the link on rebinds the port.
+	var words: Array[String] = []
 	while peer.is_bound() and peer.get_available_packet_count() > 0:
-		var word := peer.get_packet().get_string_from_utf8()
-		var signal_name: String = get_node("/root/Settings").signal_for_word(word)
-		if signal_name != "":
-			receive(signal_name)
-		else:
-			last_signal = word.strip_edges().to_upper()
-			last_action = "unknown"
-			last_msec = Time.get_ticks_msec()
+		words.append(peer.get_packet().get_string_from_utf8().strip_edges().to_upper())
+	for word in words:
+		if word.begins_with("HELLO"):
+			hello(word.trim_prefix("HELLO"))
+		elif enabled():
+			var signal_name: String = get_node("/root/Settings").signal_for_word(word)
+			if signal_name != "":
+				receive(signal_name)
+			else:
+				last_signal = word
+				last_action = "unknown"
+				last_msec = Time.get_ticks_msec()
+	update_status()
+
+## A detector saying which signals it sends. The first hello of a session
+## turns the link on; later ones only keep it connected, so unticking the
+## setting while the detector runs is respected.
+func hello(words: String) -> void:
+	var settings := get_node_or_null("/root/Settings")
+	if settings == null:
+		return
+	var was_connected := detector_connected()
+	detector_signals.clear()
+	for word in words.replace(",", " ").split(" ", false):
+		var signal_name: String = settings.signal_for_word(word)
+		if signal_name != "" and not signal_name in detector_signals:
+			detector_signals.append(signal_name)
+	last_hello_msec = Time.get_ticks_msec()
+	if not was_connected and not settings.brain_enabled:
+		settings.brain_enabled = true
+		settings.save_settings()
+		settings.apply()
+
+func update_status() -> void:
+	if enabled() and detector_connected():
+		var settings := get_node_or_null("/root/Settings")
+		var names: Array = detector_signals.map(func(signal_name: String) -> String: return settings.signal_label(signal_name))
+		status = "Headset connected (%s), UDP port %d" % [", ".join(names), settings.brain_port]
+	else:
+		status = port_status
 
 func _input(event: InputEvent) -> void:
 	if not enabled() or not event is InputEventKey or not event.pressed or event.echo:

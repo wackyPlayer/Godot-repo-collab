@@ -84,12 +84,29 @@ ones your detector reports). The `BrainLink` autoload
 | Head shake | SHAKE / N | Go / stop |
 | Nod | NOD / Y | Swing sword |
 
-With the g.tec Unicorn, `Neu_to_text_new5.py` (the team's detector) reads
-blinks from Fz and head shakes / nods from the gyroscope and sends BLINK,
-SHAKE and NOD to `127.0.0.1:1000`. Start the game, tick **Use the brain
-interface**, then run `python Neu_to_text_new5.py` (add `--debug` to see the
-measured values while tuning thresholds, `--host`/`--port` for another
-computer).
+### Playing with the g.tec Unicorn Hybrid Black
+
+You need: Python 3, Unicorn Suite Hybrid Black with a license added
+(Unicorn Suite > Licenses > Add License), and the headset switched on and
+paired over Bluetooth (close Unicorn Recorder).
+
+1. Start the game.
+2. Double-click `tools/unicorn_start.bat`.
+
+That's it. The detector (`tools/Neu_to_text_new5.py`) installs numpy if it is
+missing, finds UnicornPy in the Unicorn Suite install folder by itself, reads
+blinks from Fz and head shakes / nods from the gyroscope, and sends BLINK,
+SHAKE and NOD to the game. It also says hello every second; the game turns
+its brain interface on by itself and the menu footer shows "Headset
+connected (Blink, Head shake, Nod)". Hints then only mention those three.
+
+- Thresholds feel off? Run `tools\unicorn_start.bat --debug` to see the
+  measured values; the thresholds and gyroscope axes are constants at the
+  top of the script.
+- Game on another computer: `tools\unicorn_start.bat --host 192.168.1.20`
+  and tick **Use the brain interface** there (auto-on only works on the
+  same computer).
+- UnicornPy somewhere unusual: set `UNICORN_PY_PATH` to its folder.
 
 An arrow at the player's feet shows the heading: faint while standing,
 bright while walking, doubled while running. Each signal can be remapped in
@@ -107,8 +124,10 @@ The detector can deliver signals in either of two ways, whichever is easier:
 - **Keys:** send a key press (B, M, E, N or Y by default, rebindable). The
   same keys also let you try the controls on a keyboard.
 
-Setup: Settings > Brain interface > tick **Use the brain interface**. The
-status line shows "Listening on UDP port 1000" and the last signal received.
+Setup: Settings > Brain interface > tick **Use the brain interface** (or
+have the detector send `HELLO <words>`, e.g. `HELLO BLINK SHAKE NOD`, to
+this computer; the first hello turns it on). The status line shows
+"Listening on UDP port 1000" and the last signal received.
 Each signal has a **Test** button. Without the headset you can also run
 `python tools/send_brain_command.py BLINK`. **Ignore repeats** (default
 0.4 s) makes a signal reported twice in quick succession count once.
