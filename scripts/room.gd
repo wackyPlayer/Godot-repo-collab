@@ -247,7 +247,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if Engine.is_editor_hint():
 		return
 	if event.is_action_pressed("reset") and not transitioning:
-		knight.call("reset_to", entry_point, entry_faces_left)
+		knight.call("reset_to", entry_point, entry_faces_left, true)
 	if event.is_action_pressed("attack"):
 		swing()
 	if event.is_action_pressed("drink"):
@@ -874,6 +874,7 @@ func retry_floor(layer: CanvasLayer) -> void:
 	await fade_to(1.0)
 	restore_health()
 	knight.modulate.a = 1.0
+	knight.call("end_boost")
 	# Back to how things stood when the floor began.
 	inventory = floor_start.inventory.duplicate(true)
 	item_sources = floor_start.item_sources.duplicate(true)
