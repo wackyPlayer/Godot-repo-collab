@@ -22,6 +22,22 @@ func run_checks() -> void:
 	settings.reset_controls()
 	check(has_key("sprint", KEY_SHIFT), "Reset restores the default keys")
 	check(settings.signal_for_word(" blink ") == "blink" and settings.signal_for_word("eyes_closed") == "eyes" and settings.signal_for_word("banana") == "", "Signal words match in any case")
+	check(settings.split_words("EYES, ") == ["EYES"] and settings.signal_for_word("") == "", "An empty word never counts as a signal")
+	settings.set_key("drink", 0, KEY_E)
+	check(settings.signal_keys.eyes == KEY_NONE, "Binding a signal's key to an action takes it from the signal")
+	settings.set_signal_key("eyes", KEY_E)
+	check(settings.keys.drink.is_empty() and settings.signal_keys.eyes == KEY_E, "And binding an action's key to a signal takes it from the action")
+	settings.reset_controls()
+	# A hand-edited settings file with the wrong types falls back to defaults.
+	var bad := ConfigFile.new()
+	bad.set_value("brain", "enabled", "true")
+	bad.set_value("brain", "port", 1000.0)
+	bad.set_value("keys", "sprint", 88)
+	bad.save(settings.path)
+	settings.set_defaults()
+	settings.load_settings()
+	check(settings.brain_enabled == false and settings.brain_port == 1000 and settings.keys.sprint == [KEY_SHIFT], "Wrong types in the settings file are ignored")
+	settings.save_settings()
 
 	# The brain link, over real UDP on a test port.
 	settings.brain_enabled = true
@@ -60,6 +76,12 @@ func run_checks() -> void:
 	check(brain.last_action == "reset" and not brain.running, "A signal can be mapped to another action")
 	settings.signal_actions["eyes"] = "run"
 	brain.release_all()
+	await command("SHAKE")
+	check(brain.moving and brain.last_signal == "shake", "A head shake starts walking too")
+	await command("nod")
+	check(brain.last_signal == "nod" and brain.last_action == "swing", "A nod swings the sword")
+	check(settings.signal_doing("go") == "Close mouth or Head shake", "Hints name every signal that does an action")
+	brain.release_all()
 	await command("dance")
 	check(brain.last_command_text().contains("not a signal word"), "Unknown words are reported, not acted on")
 
@@ -87,10 +109,44 @@ func run_checks() -> void:
 	check(root.gui_get_focus_owner() == menu.main_buttons.get_child(1), "A blink moves to the next menu button")
 	await command("MOUTH")
 	check(menu.settings_panel.visible, "Closing the mouth presses it (Settings opens)")
+	check(root.gui_get_focus_owner() is TabBar, "Opening Settings focuses the tabs, so a headset can carry on")
+	var tab_before := tabs.current_tab
+	await command("NOD")
+	check(tabs.current_tab == (tab_before + 1) % 3, "A nod on the tab bar shows the next tab")
+	var stops_ok := true
+	for blink in range(14):
+		await command("BLINK")
+		var focus := root.gui_get_focus_owner()
+		stops_ok = stops_ok and (focus is BaseButton or focus is TabBar)
+	check(stops_ok, "Blinks only stop on buttons and the tab bar, never a text field")
 	menu.close_settings()
 	settings.brain_enabled = false
 	settings.apply()
 	check(not brain.is_listening() and brain.status == "Off", "Turning the link off closes the port")
+	# A detector saying hello turns the link on by itself.
+	var heading_before: int = brain.heading
+	await command("BLINK")
+	check(not settings.brain_enabled and brain.heading == heading_before, "Signals are ignored while the link is off")
+	await command("HELLO BLINK SHAKE NOD")
+	check(settings.brain_enabled and brain.is_listening() and brain.status.begins_with("Headset connected (Blink, Head shake, Nod)"), "A detector's hello turns the link on")
+	check(settings.brain_hint().contains("Nod") and not settings.brain_hint().contains("Close mouth"), "Hints only name the signals the detector sends")
+	check(settings.signal_doing("go") == "Head shake", "Tutorial wording uses the detector's signals")
+	check(menu.brain_checkbox.button_pressed, "The checkbox follows a headset turning the link on")
+	settings.save_settings()
+	var saved := ConfigFile.new()
+	saved.load(settings.path)
+	check(saved.get_value("brain", "enabled") == false, "Turning on by hello is not saved for the next player")
+	var intruder := PacketPeerUDP.new()
+	check(intruder.bind(settings.brain_port, "127.0.0.1") != OK, "A second copy of the game can't take this computer's signals")
+	intruder.close()
+	await wait(3.2)
+	check(not settings.brain_enabled and brain.status == "Off", "A link the headset turned on turns off when it goes quiet")
+	await command("HELLO BLINK SHAKE NOD")
+	settings.brain_enabled = false
+	settings.brain_auto_enabled = false
+	settings.apply()
+	await command("HELLO BLINK SHAKE NOD")
+	check(not settings.brain_enabled, "Later hellos respect turning the link off")
 	menu.queue_free()
 	await process_frame
 
@@ -103,6 +159,10 @@ func run_checks() -> void:
 func command(word: String) -> void:
 	brain.send_test(word)
 	await wait(0.1)
+	# Input events the link sends are flushed on a later frame; right after
+	# start-up 0.1 s can pass within a single frame.
+	await process_frame
+	await process_frame
 
 func wait(seconds: float) -> void:
 	await create_timer(seconds).timeout

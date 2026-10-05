@@ -13,6 +13,7 @@ func _initialize() -> void:
 
 func run_checks() -> void:
 	Engine.time_scale = 4.0
+	await check_headset()
 	tutorial = load("res://scenes/tutorial.tscn").instantiate()
 	tutorial.fade_time = 0.0
 	root.add_child(tutorial)
@@ -56,6 +57,28 @@ func run_checks() -> void:
 	if failures == 0:
 		print("PASS: All prologue checks.")
 	quit(0 if failures == 0 else 1)
+
+## The Unicorn detector connecting after the chamber opened: blink, shake and
+## nod only, so no running lesson.
+func check_headset() -> void:
+	var settings: Node = root.get_node("Settings")
+	settings.path = "user://test_tutorial_settings.cfg"
+	settings.brain_port = 47125
+	settings.apply()
+	var chamber: Node2D = load("res://scenes/tutorial.tscn").instantiate()
+	chamber.fade_time = 0.0
+	root.add_child(chamber)
+	await ticks(3)
+	root.get_node("BrainLink").send_test("HELLO BLINK SHAKE NOD")
+	await ticks(10)
+	check(chamber.prompt.text == "Head shake to start or stop walking. Blink to turn.", "The lesson switches to the headset's signals when it connects")
+	check(chamber.controls_label.text.begins_with("Blink turn"), "So does the reminder at the bottom")
+	chamber.walked = chamber.LESSON_DISTANCE + 1.0
+	await ticks(3)
+	check(chamber.step == chamber.Step.APPROACH, "With no signal set to run, the running lesson is skipped")
+	chamber.queue_free()
+	await ticks(2)
+	settings.use_defaults()
 
 func hold(keys: Array, count: int) -> void:
 	for keycode: Key in keys:

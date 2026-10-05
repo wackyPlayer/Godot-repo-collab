@@ -247,13 +247,26 @@ func generate(seed_value: int, room_count: int, min_exit_distance := 0) -> Dicti
 	rng.seed = seed_value
 	room_count = clampi(room_count, 4, (MAX_X * 2 + 1) * (MAX_Y * 2 + 1) / 2)
 	var rooms := {}
+	# If no attempt reaches the stairs distance, fall back to the farthest
+	# playable floor, never one without stairs or with the wrong size.
+	var best := {}
+	var best_distance := -1
 	for attempt in range(400):
-		rooms = grow_plan(rng, room_count)
-		if rooms.size() != room_count or not assign_kinds(rng, rooms):
+		var plan := grow_plan(rng, room_count)
+		if plan.size() != room_count or not assign_kinds(rng, plan):
 			continue
-		add_loops(rng, rooms)
-		if exit_distance(rooms) >= min_exit_distance:
+		add_loops(rng, plan)
+		var distance := exit_distance(plan)
+		if distance > best_distance:
+			best = plan
+			best_distance = distance
+		if distance >= min_exit_distance:
 			break
+	rooms = best
+	if rooms.is_empty():
+		push_error("Dungeon generator: no playable %d-room floor for seed %d" % [room_count, seed_value])
+	elif best_distance < min_exit_distance:
+		push_warning("Dungeon generator: stairs only %d doors from the start (wanted %d)" % [best_distance, min_exit_distance])
 	for room: Room in rooms.values():
 		build_interior(rng, room)
 	return rooms
@@ -312,10 +325,12 @@ func assign_kinds(rng: RandomNumberGenerator, rooms: Dictionary) -> bool:
 	dead_ends.sort_custom(func(a: Room, b: Room) -> bool: return a.depth > b.depth)
 	dead_ends[0].kind = "exit"
 	var others := dead_ends.slice(1)
+	# Two vaults never hold the same item (a second sword would do nothing).
+	var items := ITEMS.duplicate()
 	for index in range(mini(2, others.size())):
 		var pick := rng.randi() % others.size()
 		others[pick].kind = "treasure"
-		others[pick].item = ITEMS[rng.randi() % ITEMS.size()]
+		others[pick].item = items.pop_at(rng.randi() % items.size())
 		others.remove_at(pick)
 	return true
 
@@ -359,7 +374,7 @@ func build_interior(rng: RandomNumberGenerator, room: Room) -> void:
 
 
 ## Torches hang on the wall, so they never block the floor. Columns 3-4 and
-## 15-16 already carry the room's fixed pair, and 9-10 are the north door.
+## 16-17 already carry the room's fixed pair, and 9-10 are the north door.
 func place_torches(rng: RandomNumberGenerator, room: Room) -> void:
 	var free_columns: Array[int] = [0, 1, 6, 7, 12, 13, 18, 19]
 	for index in range(rng.randi_range(0, 2)):

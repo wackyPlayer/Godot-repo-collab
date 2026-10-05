@@ -90,7 +90,7 @@ func _process(delta: float) -> void:
 	if step == Step.WALK:
 		walked += moved
 		if walked > LESSON_DISTANCE:
-			advance(Step.RUN)
+			advance(Step.RUN if can_run() else Step.APPROACH)
 	elif step == Step.RUN and Input.is_action_pressed("sprint"):
 		ran += moved
 		if ran > LESSON_DISTANCE:
@@ -101,6 +101,19 @@ func _process(delta: float) -> void:
 func advance(next: Step) -> void:
 	step = next
 	update_hud()
+
+## False when playing by headset and no signal is set to run, so the running
+## lesson can't be done (the Unicorn detector sends blink, shake and nod).
+func can_run() -> bool:
+	var settings := get_node_or_null("/root/Settings")
+	return not (settings and settings.brain_enabled) or brain_signal_for("run") != ""
+
+func refresh_controls_hint() -> void:
+	super()
+	if step == Step.RUN and not can_run():
+		advance(Step.APPROACH)
+	elif prompt:
+		update_hud()
 
 ## The mage's scene: a few words, the spell, and a rock where a knight stood.
 func curse() -> void:
@@ -242,7 +255,9 @@ func update_hud() -> void:
 	match step:
 		Step.WALK:
 			if brain_signal_for("go") != "":
-				prompt.text = "%s to start or stop walking. %s to turn." % [brain_signal_for("go"), brain_signal_for("turn")]
+				prompt.text = "%s to start or stop walking." % brain_signal_for("go")
+				if brain_signal_for("turn") != "":
+					prompt.text += " %s to turn." % brain_signal_for("turn")
 			else:
 				prompt.text = "Use %s to walk." % move_keys_text()
 		Step.RUN:

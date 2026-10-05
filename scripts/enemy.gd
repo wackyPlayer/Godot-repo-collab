@@ -86,8 +86,11 @@ func _physics_process(delta: float) -> void:
 		shove = shove.move_toward(Vector2.ZERO, 900.0 * delta)
 		move_and_slide()
 		return
-	if is_instance_valid(target) and position.distance_to(target.position) < sight:
-		velocity = position.direction_to(target.position) * chase_speed
+	var to_target := position.distance_to(target.position) if is_instance_valid(target) else INF
+	if to_target < sight:
+		# Stop on the target instead of overshooting it, which would flip the
+		# sprite back and forth every frame while sitting on the player.
+		velocity = position.direction_to(target.position) * minf(chase_speed, to_target / delta)
 	else:
 		wander_left -= delta
 		if wander_left <= 0.0:

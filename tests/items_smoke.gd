@@ -23,6 +23,7 @@ func run_checks() -> void:
 	await check_sword()
 	await check_potion()
 	await check_bubble()
+	await check_retry()
 	room.queue_free()
 	await process_frame
 	if failures == 0:
@@ -61,7 +62,7 @@ func check_potion() -> void:
 	key(KEY_Q)
 	await ticks(3)
 	check(knight.speed_boost > 1.0, "Drinking the potion speeds the player up")
-	check(room.inventory.potion == 0 and not room.rooms[cell].item_taken, "The potion is used up and waits in its room again")
+	check(room.inventory.potion == 0 and room.rooms[cell].item_taken and room.pending_returns.has(room.rooms[cell]), "The potion is used up and will wait in its room once you leave")
 	for attempt in range(200):
 		if room.health == room.MAX_HEALTH:
 			break
@@ -86,7 +87,7 @@ func check_bubble() -> void:
 		await ticks(1)
 	check(slime.is_trapped(), "An enemy that hits the player is trapped in the bubble")
 	check(room.health == room.MAX_HEALTH, "The bubble takes the hit")
-	check(room.inventory.bubble == 0 and not room.rooms[cell].item_taken, "The bubble is used up and waits in its room again")
+	check(room.inventory.bubble == 0 and room.pending_returns.has(room.rooms[cell]), "The bubble is used up and will wait in its room once you leave")
 	knight.invulnerable = 0.0
 	knight.position = slime.position
 	await ticks(10)
@@ -104,6 +105,34 @@ func check_bubble() -> void:
 			break
 		await ticks(1)
 	check(room.health == room.MAX_HEALTH - 1 and not other.is_trapped(), "Without a bubble, the next hit costs a heart")
+
+## Crumbling mid-potion, with the brain link walking, then trying again.
+func check_retry() -> void:
+	var cell := treasure_cell()
+	room.enter_room(cell, -1)
+	room.collect("potion")
+	var brain: Node = root.get_node("BrainLink")
+	brain.moving = true
+	brain.update_motion()
+	room.health = 2
+	room.drink_potion()
+	room.health = 1
+	knight.invulnerable = 0.0
+	room.take_damage(knight.position + Vector2(10, 0))
+	for attempt in range(400):
+		if room.has_node("GameOver"):
+			break
+		await ticks(1)
+	check(not Input.is_action_pressed("move_up") and not brain.moving, "Crumbling stops brain-held walking")
+	await create_timer(room.REGEN_STEP * room.REGEN_HEARTS + 0.5).timeout
+	check(room.health == 0, "A potion drunk before crumbling heals no more")
+	room.retry_floor(room.get_node("GameOver"))
+	await ticks(3)
+	check(room.inventory == room.floor_start.inventory and room.inventory.potion == 0, "Trying the floor again restores the items you arrived with")
+	check(room.rooms_explored == room.floor_start.rooms_explored + 1, "Rooms explored count from where the floor began")
+	room.enter_room(cell, -1)
+	room.collect("potion")
+	check(room.inventory.potion == 1, "The floor's potion can't be collected twice by retrying")
 
 func treasure_cell() -> Vector2i:
 	for cell: Vector2i in room.rooms:

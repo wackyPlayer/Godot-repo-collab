@@ -134,6 +134,12 @@ func boost(seconds: float, factor: float) -> void:
 	speed_boost = factor
 	boost_left = seconds
 
+## Ends a potion's speed boost early, e.g. when the floor starts over.
+func end_boost() -> void:
+	speed_boost = 1.0
+	boost_left = 0.0
+	sprite.self_modulate = Color.WHITE
+
 func hurt(from: Vector2) -> void:
 	knockback = from.direction_to(position) * KNOCKBACK
 	invulnerable = INVULNERABLE_TIME
@@ -144,12 +150,15 @@ func hurt_rect() -> Rect2:
 func is_invulnerable() -> bool:
 	return invulnerable > 0.0
 
-func reset_to(spawn: Vector2, face_left := false) -> void:
+## `keep_safety` keeps the blinking safe time after a hit (R mid-blink must
+## not end it early).
+func reset_to(spawn: Vector2, face_left := false, keep_safety := false) -> void:
 	position = spawn
 	velocity = Vector2.ZERO
 	knockback = Vector2.ZERO
-	invulnerable = 0.0
-	sprite.modulate.a = 1.0
+	if not keep_safety:
+		invulnerable = 0.0
+		sprite.modulate.a = 1.0
 	if carving:
 		carving.emitting = false
 	animation_time = 0.0
