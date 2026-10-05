@@ -24,6 +24,11 @@ var was_moving := false
 var rock := false
 var knockback := Vector2.ZERO
 var invulnerable := 0.0
+## The last direction moved in; the sword swings this way.
+var aim := Vector2.RIGHT
+## The potion's speed boost: a multiplier and how long it lasts.
+var speed_boost := 1.0
+var boost_left := 0.0
 
 func _ready() -> void:
 	motion_mode = CharacterBody2D.MOTION_MODE_FLOATING
@@ -32,7 +37,9 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	var direction := Input.get_vector("move_left", "move_right", "move_up", "move_down")
 	var running := Input.is_action_pressed("sprint")
-	velocity = direction * (RUN_SPEED if running else WALK_SPEED) + knockback
+	velocity = direction * (RUN_SPEED if running else WALK_SPEED) * speed_boost + knockback
+	if direction != Vector2.ZERO:
+		aim = direction.normalized()
 	knockback = knockback.move_toward(Vector2.ZERO, KNOCKBACK_DECAY * delta)
 	move_and_slide()
 	if invulnerable > 0.0:
@@ -40,6 +47,14 @@ func _physics_process(delta: float) -> void:
 		sprite.modulate.a = 0.35 if fmod(invulnerable, 0.16) < 0.07 else 1.0
 	else:
 		sprite.modulate.a = 1.0
+	if boost_left > 0.0:
+		boost_left -= delta
+		# A cool shimmer while the potion lasts.
+		var shimmer := 0.5 + 0.5 * sin(boost_left * 12.0)
+		sprite.self_modulate = Color(1.0, 1.0, 1.0).lerp(Color(0.7, 1.15, 1.35), shimmer)
+		if boost_left <= 0.0:
+			speed_boost = 1.0
+			sprite.self_modulate = Color.WHITE
 	# Actual motion makes the knight idle when pushing directly into a wall.
 	var moving := get_position_delta().length_squared() > 0.001
 	if direction.x != 0.0:
@@ -66,6 +81,10 @@ func set_rock(value: bool) -> void:
 	rock = value
 	sprite.texture = sheet(was_moving)
 	face(sprite.flip_h)
+
+func boost(seconds: float, factor: float) -> void:
+	speed_boost = factor
+	boost_left = seconds
 
 func hurt(from: Vector2) -> void:
 	knockback = from.direction_to(position) * KNOCKBACK

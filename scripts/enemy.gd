@@ -2,7 +2,8 @@ extends CharacterBody2D
 ## A dungeon enemy. It shuffles around where it spawned and chases the player
 ## on sight; touching it costs a heart. The slime and skeleton scenes share
 ## this script with their own speeds and sheets. On floor 4 room.gd enrages
-## every enemy: player-running speed, longer sight and red eyes.
+## every enemy: player-running speed, longer sight and red eyes. A bubble can
+## trap an enemy for a while, and the sword defeats it.
 
 signal touched(from: Vector2)
 
@@ -16,6 +17,7 @@ signal touched(from: Vector2)
 @export var red_eyes: Texture2D
 
 const LEASH := 96.0
+const BUBBLE: Texture2D = preload("res://assets/bubble.png")
 ## A beat after a room appears before enemies move, so nothing can hit the
 ## player in the same instant they walk through a door.
 const WAKE_TIME := 0.6
@@ -28,6 +30,10 @@ var time := randf() * 4.0
 var asleep := WAKE_TIME
 ## Set before the enemy enters the tree.
 var enraged := false
+## While trapped in a bubble the enemy floats in place and cannot hurt.
+var trapped := 0.0
+var bubble: Sprite2D
+var defeated := false
 
 @onready var sprite: Sprite2D = $Sprite
 @onready var hitbox: Area2D = $Hitbox
@@ -48,6 +54,15 @@ func enrage(speed: float, new_sight: float) -> void:
 func _physics_process(delta: float) -> void:
 	time += delta
 	sprite.frame = int(time * frames_per_second) % sprite.vframes
+	if trapped > 0.0:
+		trapped -= delta
+		# Bob gently inside the bubble.
+		var bob := sin(time * 4.0) * 2.0
+		sprite.position.y = sprite_rest_y() - 6.0 + bob
+		bubble.position.y = -16.0 - 6.0 + bob
+		if trapped <= 0.0:
+			release()
+		return
 	if asleep > 0.0:
 		asleep -= delta
 		return
@@ -67,6 +82,49 @@ func _physics_process(delta: float) -> void:
 	for body in hitbox.get_overlapping_bodies():
 		if body == target:
 			touched.emit(position)
+
+## Traps the enemy in a bubble for `seconds`; it cannot move or hurt.
+func trap(seconds: float) -> void:
+	trapped = seconds
+	velocity = Vector2.ZERO
+	if not bubble:
+		bubble = Sprite2D.new()
+		bubble.texture = BUBBLE
+		bubble.scale = Vector2(0.38, 0.38)
+		bubble.modulate = Color(1, 1, 1, 0.85)
+		bubble.z_index = 1
+		add_child(bubble)
+	bubble.position = Vector2(0, -16)
+	bubble.scale = Vector2(0.1, 0.1)
+	bubble.create_tween().tween_property(bubble, "scale", Vector2(0.38, 0.38), 0.2).set_trans(Tween.TRANS_BACK)
+
+func is_trapped() -> bool:
+	return trapped > 0.0
+
+func release() -> void:
+	trapped = 0.0
+	sprite.position.y = sprite_rest_y()
+	if bubble:
+		bubble.queue_free()
+		bubble = null
+
+func sprite_rest_y() -> float:
+	return -16.0
+
+## Struck by the sword: flash, shrink and vanish.
+func defeat() -> void:
+	if defeated:
+		return
+	defeated = true
+	set_physics_process(false)
+	$Feet.set_deferred("disabled", true)
+	hitbox.set_deferred("monitoring", false)
+	if bubble:
+		bubble.queue_free()
+	var vanish := create_tween().set_parallel()
+	vanish.tween_property(self, "modulate", Color(2.5, 2.5, 2.5, 0.0), 0.25)
+	vanish.tween_property(sprite, "scale", sprite.scale * Vector2(1.4, 0.3), 0.25)
+	vanish.chain().tween_callback(queue_free)
 
 func face(left: bool) -> void:
 	sprite.flip_h = left

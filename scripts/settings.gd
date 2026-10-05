@@ -12,6 +12,8 @@ const ACTIONS := [
 	{"action": "move_right", "label": "Move right", "keys": [KEY_D, KEY_RIGHT]},
 	{"action": "sprint", "label": "Run", "keys": [KEY_SHIFT]},
 	{"action": "reset", "label": "Back to door", "keys": [KEY_R]},
+	{"action": "attack", "label": "Swing sword", "keys": [KEY_SPACE, KEY_J]},
+	{"action": "drink", "label": "Drink potion", "keys": [KEY_Q]},
 ]
 ## Not rebindable: Esc always opens the menu.
 const MENU_KEY := KEY_ESCAPE
@@ -28,6 +30,8 @@ const BRAIN_ACTIONS := [
 	["go", "Go / stop"],
 	["run", "Run on / off"],
 	["reset", "Back to door"],
+	["swing", "Swing sword"],
+	["drink", "Drink potion"],
 	["none", "Nothing"],
 ]
 const DEFAULT_PORT := 1000

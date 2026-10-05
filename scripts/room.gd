@@ -56,6 +56,22 @@ const ITEM_ART := {
 	"bubble": preload("res://assets/bubble.png"),
 }
 const ITEM_NAMES := {"sword": "a violet sword", "potion": "a blue potion", "bubble": "a bubble charm"}
+## The sword is kept once found. Potions and bubbles are used up, and then
+## reappear in the room they came from, so they must be picked up again.
+const SWING_TIME := 0.18
+const SWING_COOLDOWN := 0.35
+const SWING_REACH := 46.0
+const SWING_ARC := deg_to_rad(80.0)
+## Drinking a potion: a heart back every REGEN_STEP seconds, REGEN_HEARTS
+## times, and faster movement for BOOST_TIME seconds.
+const REGEN_HEARTS := 3
+const REGEN_STEP := 1.5
+const BOOST_TIME := 8.0
+const BOOST_FACTOR := 1.5
+## A bubble traps the enemy that hit you for this long. With
+## BUBBLE_BLOCKS_DAMAGE the hit itself does no harm.
+const BUBBLE_TIME := 8.0
+const BUBBLE_BLOCKS_DAMAGE := true
 const TILE := 32
 const ORIGIN := Vector2(32, 64)
 const COLUMNS := Generator.COLS + 2
@@ -137,6 +153,10 @@ var finale_time := 0.0
 var camera_pan := Vector2.ZERO
 var start_msec := 0
 var inventory := {"sword": 0, "potion": 0, "bubble": 0}
+## For each carried item, where it was found: [floor, room cell].
+var item_sources := {"sword": [], "potion": [], "bubble": []}
+var swing_ready := true
+var item_counts := {}
 var run_seed := 0
 var entry_point := START_SPAWN
 var entry_faces_left := false
@@ -209,6 +229,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed("reset") and not transitioning:
 		knight.call("reset_to", entry_point, entry_faces_left)
+	if event.is_action_pressed("attack"):
+		swing()
+	if event.is_action_pressed("drink"):
+		drink_potion()
 	if event.is_action_pressed("quit"):
 		get_tree().change_scene_to_file(MAIN_MENU)
 
@@ -340,14 +364,93 @@ func _on_stairs_entered(body: Node2D) -> void:
 		descend.call_deferred()
 
 func _on_item_entered(body: Node2D, pickup: Area2D) -> void:
-	if body != knight or current.item_taken:
+	# As with doors, ignore a stale overlap reported just after a room swap.
+	var close := knight.position.distance_to(pickup.position) < 32.0
+	if body != knight or current.item_taken or not close:
 		return
-	current.item_taken = true
-	inventory[current.item] += 1
-	if current.item == "potion":
-		heal()
+	collect(current.item)
 	pickup.queue_free()
+
+func collect(item: String) -> void:
+	current.item_taken = true
+	inventory[item] += 1
+	item_sources[item].append([floor_number, current.cell])
 	update_hud()
+
+## Uses up a potion or bubble. It reappears in the room it came from, the
+## next time that room is entered.
+func use_item(item: String) -> void:
+	inventory[item] -= 1
+	var source: Array = item_sources[item].pop_back()
+	if source and source[0] == floor_number and rooms.has(source[1]):
+		rooms[source[1]].item_taken = false
+	update_hud()
+
+# --- Items ---------------------------------------------------------------------
+
+## The sword sweeps an arc in the direction the player last moved (or the
+## brain heading) and defeats every enemy it touches, trapped ones included.
+func swing() -> void:
+	if inventory.sword <= 0 or not swing_ready or transitioning or health <= 0:
+		return
+	swing_ready = false
+	var brain := get_node_or_null("/root/BrainLink")
+	var aim: Vector2 = brain.heading_vector() if brain and brain.enabled() else knight.get("aim")
+	var body := knight.position + Vector2(0, -10)
+	var pivot := Node2D.new()
+	pivot.position = Vector2(0, -10)
+	pivot.z_index = 1
+	knight.add_child(pivot)
+	var blade := Sprite2D.new()
+	blade.texture = ITEM_ART.sword
+	blade.scale = Vector2(0.25, 0.25)
+	# The art points up and to the right; turn it to point along +X.
+	blade.rotation = PI / 4.0
+	blade.position = Vector2(16, 0)
+	# Brightened so the dark blade reads against the dark floor.
+	blade.modulate = Color(1.7, 1.6, 2.0)
+	pivot.add_child(blade)
+	# A white swoosh along the arc, fading out.
+	var swoosh := Line2D.new()
+	swoosh.position = Vector2(0, -10)
+	swoosh.z_index = 1
+	swoosh.width = 3.0
+	var fade := Gradient.new()
+	fade.colors = PackedColorArray([Color(1, 1, 1, 0.0), Color(1, 1, 1, 0.85)])
+	swoosh.gradient = fade
+	for step in range(9):
+		var angle := lerpf(aim.angle() - SWING_ARC, aim.angle() + SWING_ARC, step / 8.0)
+		swoosh.add_point(Vector2.from_angle(angle) * 28.0)
+	knight.add_child(swoosh)
+	var trail_fade := swoosh.create_tween()
+	trail_fade.tween_property(swoosh, "modulate:a", 0.0, SWING_TIME + 0.12)
+	trail_fade.tween_callback(swoosh.queue_free)
+	var sweep := pivot.create_tween()
+	pivot.rotation = aim.angle() - SWING_ARC
+	sweep.tween_property(pivot, "rotation", aim.angle() + SWING_ARC, SWING_TIME).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	sweep.tween_callback(pivot.queue_free)
+	for node in props.get_children():
+		if not node.has_method("defeat"):
+			continue
+		var offset: Vector2 = node.position + Vector2(0, -10) - body
+		if offset.length() <= SWING_REACH and absf(aim.angle_to(offset)) <= SWING_ARC + 0.3:
+			burst(node.position + Vector2(0, -12), Color("e1d6fb"), 10)
+			node.call("defeat")
+	await get_tree().create_timer(SWING_COOLDOWN).timeout
+	swing_ready = true
+
+## Regenerates hearts over a few seconds and speeds the player up.
+func drink_potion() -> void:
+	if inventory.potion <= 0 or transitioning or health <= 0:
+		return
+	use_item("potion")
+	knight.call("boost", BOOST_TIME, BOOST_FACTOR)
+	burst(knight.position + Vector2(0, -12), Color("7fc8ff"), 12)
+	caption_label.text = "You drink the potion: hearts mend and your steps quicken."
+	var regen := create_tween()
+	for step in range(REGEN_HEARTS):
+		regen.tween_interval(REGEN_STEP)
+		regen.tween_callback(heal)
 
 # --- Building the room ------------------------------------------------------
 
@@ -446,7 +549,7 @@ func spawn_enemy(kind: String, at: Vector2) -> CharacterBody2D:
 	var enemy: CharacterBody2D = ENEMY_SCENES[kind].instantiate()
 	enemy.position = at
 	enemy.set("target", knight)
-	enemy.connect("touched", take_damage)
+	enemy.connect("touched", take_damage.bind(enemy))
 	if is_fast_floor():
 		enemy.call("enrage", Knight.RUN_SPEED, ENRAGED_SIGHT)
 	props.add_child(enemy)
@@ -584,6 +687,11 @@ func make_interface() -> void:
 		icon.tooltip_text = ITEM_NAMES[item]
 		slots.add_child(icon)
 		item_slots[item] = icon
+		# "x2" when carrying more than one.
+		var count := make_label(icon, "", Vector2(16, 14), 10, Color("f0e5ff"))
+		count.add_theme_constant_override("outline_size", 4)
+		count.add_theme_color_override("font_outline_color", Color("07050f"))
+		item_counts[item] = count
 	minimap = Control.new()
 	minimap.position = Vector2(560, 6)
 	minimap.size = Vector2(176, 52)
@@ -653,9 +761,18 @@ func animate_heart(index: int, frames: Array, step := 0.07) -> void:
 		tween.tween_interval(step)
 
 ## Called by anything that hurts the player, with where the hurt came from.
-func take_damage(from: Vector2) -> void:
+func take_damage(from: Vector2, attacker: Node = null) -> void:
 	if transitioning or health <= 0 or knight.call("is_invulnerable"):
 		return
+	# A carried bubble springs out and traps whatever hit the player.
+	if attacker and inventory.bubble > 0 and attacker.has_method("trap") and not attacker.call("is_trapped"):
+		use_item("bubble")
+		attacker.call("trap", BUBBLE_TIME)
+		burst(attacker.position + Vector2(0, -16), Color("bfe4ff"), 12)
+		caption_label.text = "Your bubble caught it!"
+		if BUBBLE_BLOCKS_DAMAGE:
+			knight.call("hurt", from)
+			return
 	health -= 1
 	knight.call("hurt", from)
 	# The lost heart flashes, empties and cracks.
@@ -703,6 +820,19 @@ func retry_floor(layer: CanvasLayer) -> void:
 	knight.set_physics_process(true)
 	transitioning = false
 
+## How to use an item, with the player's own key or brain signal.
+func item_hint(item: String) -> String:
+	match item:
+		"sword":
+			var signal_name := brain_signal_for("swing")
+			return "%s to swing it." % (signal_name if signal_name != "" else key_hint("attack", "Space"))
+		"potion":
+			var signal_name := brain_signal_for("drink")
+			return "%s to drink it: hearts mend and you speed up." % (signal_name if signal_name != "" else key_hint("drink", "Q"))
+		"bubble":
+			return "It will trap the next enemy that hits you."
+	return ""
+
 ## The first key bound to an action, as the player set it in Settings.
 func key_hint(action: String, fallback: String) -> String:
 	var settings := get_node_or_null("/root/Settings")
@@ -713,7 +843,7 @@ func controls_hint() -> String:
 	var settings := get_node_or_null("/root/Settings")
 	if settings and settings.brain_enabled:
 		return settings.brain_hint()
-	return "%s  move     %s  run" % [move_keys_text(), key_hint("sprint", "Shift")]
+	return "%s  move     %s  run     %s  swing     %s  drink" % [move_keys_text(), key_hint("sprint", "Shift"), key_hint("attack", "Space"), key_hint("drink", "Q")]
 
 ## Tutorial wording for an action: the brain signal if the headset is on.
 func brain_signal_for(action: String) -> String:
@@ -747,6 +877,7 @@ func update_hud() -> void:
 	for item: String in item_slots:
 		# Items not found yet show as dark silhouettes.
 		item_slots[item].modulate = Color.WHITE if inventory[item] > 0 else Color(0.3, 0.25, 0.45, 0.55)
+		item_counts[item].text = "x%d" % inventory[item] if inventory[item] > 1 else ""
 	match current.kind:
 		"start":
 			if endless:
@@ -767,7 +898,7 @@ func update_hud() -> void:
 		"final":
 			caption_label.text = "" if finale_started else "The mage waits at the end of the hall."
 		"treasure":
-			caption_label.text = "Something glints here." if not current.item_taken else "You found %s." % ITEM_NAMES[current.item]
+			caption_label.text = "Something glints here." if not current.item_taken else "You found %s. %s" % [ITEM_NAMES[current.item], item_hint(current.item)]
 		_:
 			caption_label.text = "Seed %d" % run_seed
 	minimap.queue_redraw()

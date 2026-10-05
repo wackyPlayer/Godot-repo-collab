@@ -10,6 +10,8 @@ extends Node
 ##   go    - start or stop walking along the heading
 ##   run   - running on or off
 ##   reset - back to the door you came in by
+##   swing - swing the sword (once you have it)
+##   drink - drink a potion (if you carry one)
 ## In menus, a blink moves to the next button and a closed mouth presses it.
 ## tools/send_brain_command.py sends test signals without a headset.
 
@@ -129,9 +131,11 @@ func game_action(action: String) -> void:
 		"run":
 			running = not running
 			hold("sprint", running)
-		"reset":
-			hold("reset", true)
-			hold("reset", false)
+		"reset", "swing", "drink":
+			# One tap of the matching key action.
+			var key_action: String = {"reset": "reset", "swing": "attack", "drink": "drink"}[action]
+			hold(key_action, true)
+			hold(key_action, false)
 
 func update_motion() -> void:
 	for index in range(HEADINGS.size()):

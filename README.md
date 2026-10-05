@@ -28,10 +28,25 @@ trail and scatter gravel behind you. Each mark fades out and is gone 20
 seconds later. Trails are kept per room, so they show where you just were,
 which helps on floor 4.
 
+**Items** (found in dead-end vaults; shown top right):
+
+- **Sword:** kept for good once found. **Space** (or J) swings it in an arc
+  toward the way you last moved, or along the brain heading. One hit
+  defeats an enemy, even one trapped in a bubble.
+- **Potion:** carried until you drink it with **Q**. It mends a heart every
+  1.5 s (three times) and speeds you up by half for 8 s.
+- **Bubble charm:** used automatically when an enemy hits you: the bubble
+  takes the hit and traps that enemy for 8 s, harmless and floating.
+
+Potions and bubbles are used up, and then reappear in the room they came
+from, so you have to go back and pick them up again. You can carry several.
+For brain play, map a signal to Swing sword or Drink potion in Settings.
+The numbers are constants near the top of `scripts/room.gd`; set
+`BUBBLE_BLOCKS_DAMAGE` to false if the hit should still cost a heart.
+
 **Health:** three hearts at the top left: red while you are a knight, stone
 once you are a rock. Touching an enemy costs a heart, knocks you back, and
-leaves you blinking and safe for a moment. The potion refills a heart.
-Running out shows a game-over menu: retry the same floor (same layout, full
+leaves you blinking and safe for a moment. Running out shows a game-over menu: retry the same floor (same layout, full
 hearts), go back to the round chamber, or quit.
 
 Animated torches light every room. The FPS counter sits at the bottom left.
@@ -133,6 +148,7 @@ godot --headless --path . --script res://tests/room_smoke.gd
 godot --headless --path . --script res://tests/tutorial_smoke.gd
 godot --headless --path . --script res://tests/floors_smoke.gd
 godot --headless --path . --script res://tests/menu_smoke.gd
+godot --headless --path . --script res://tests/items_smoke.gd
 godot --headless --path . --script res://tests/door_regression.gd
 ```
 
