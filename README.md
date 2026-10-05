@@ -1,26 +1,103 @@
 # Caballerito — The Violet Keep
 
-A top-down Godot 4 dungeon crawl. The game opens with a short prologue
-(`scenes/tutorial.tscn`): the knight learns to walk and run, then meets the
-mage, who turns them into a rock. The north door then opens into the dungeon
-(`scenes/room.tscn`), which you explore in rock form. Every run builds a new
-keep: a branching floor of rooms joined by doors, with stairs down in the
-deepest dead end and items (sword, potion, bubble charm) waiting in other dead
-ends. Each floor down adds two more rooms.
+A top-down Godot 4 dungeon crawl across five floors.
+
+| Floor | What happens |
+| --- | --- |
+| 1 | **The round chamber** (`scenes/tutorial.tscn`). Learn to walk and run, then the mage turns you into a rock. The sealed north door opens. |
+| 2 | Generated floor, 8 rooms, 2-3 enemies per room. |
+| 3 | Generated floor in a dim red, 10 rooms, 5-7 enemies per room. |
+| 4 | Red as hell: a deep pulsing red, a red vignette and rising embers. A maze of 22 rooms with the stairs at least 8 rooms from the start. Every enemy has red eyes and chases as fast as you run. |
+| 5 | **The sanctum**: one hall and the final cutscene. The mage laughs that there is no cure and you will be a rock forever, then the win screen. |
+
+The win screen offers **endless mode** (floors 6 and beyond, still a rock,
+with more enemies as you go), playing again, or quitting. Floor sizes, enemy
+counts and speeds are set near the top of `scripts/room.gd`.
+
+**Enemies** (`scripts/enemy.gd`): slime cubes (slow) and skeletons (faster,
+see further). They wander near where they spawn and chase you on sight. They
+wait a moment after you enter a room, and never spawn near the door you came
+in by. Floor 4 swaps in the red-eyed sheets (`assets/*_red.png`).
+
+The floor tints colour only the room (floor, walls, blocks), so the player,
+enemies and their red eyes stay readable. The mage is drawn at 3x, and the
+camera pans to frame it during both cutscenes.
+
+**The rock's trail** (`scripts/rock_trail.gd`): in rock form you scrape a pale
+trail and scatter gravel behind you. Each mark fades out and is gone 20
+seconds later. Trails are kept per room, so they show where you just were,
+which helps on floor 4.
+
+**Items** (found in dead-end vaults; shown top right):
+
+- **Sword:** kept for good once found. **Space** (or J) swings it in an arc
+  toward the way you last moved, or along the brain heading. One hit
+  defeats an enemy, even one trapped in a bubble.
+- **Potion:** carried until you drink it with **Q**. It mends a heart every
+  1.5 s (three times) and speeds you up by half for 8 s.
+- **Bubble charm:** used automatically when an enemy hits you: the bubble
+  takes the hit and traps that enemy for 8 s, harmless and floating.
+
+Potions and bubbles are used up, and then reappear in the room they came
+from, so you have to go back and pick them up again. You can carry several.
+For brain play, map a signal to Swing sword or Drink potion in Settings.
+The numbers are constants near the top of `scripts/room.gd`; set
+`BUBBLE_BLOCKS_DAMAGE` to false if the hit should still cost a heart.
+
+**Health:** three hearts at the top left: red while you are a knight, stone
+once you are a rock. Touching an enemy costs a heart, knocks you back, and
+leaves you blinking and safe for a moment. Running out shows a game-over menu: retry the same floor (same layout, full
+hearts), go back to the round chamber, or quit.
+
+Animated torches light every room. The FPS counter sits at the bottom left.
+The soundtrack lives in the `Music` autoload (`scripts/music.gd`) and
+crossfades between tracks: Glitcher's "Dyalla" for floors 1-4 and Evening
+Telecast's "Final Boss" for the sanctum (endless floors alternate them).
 
 Open `project.godot` in Godot 4 and press **F5**.
 
-Rooms are 704 pixels wide and 768 pixels tall: the original width and twice the
-original height. A `Camera2D` child of the knight follows it at 1x zoom in both
-the prologue and dungeon. Door transitions and reset move the camera immediately.
-The HUD and minimap stay fixed on screen.
+The game opens on the **main menu** (`scenes/main_menu.tscn`): Play, Settings
+and Quit. Esc in game returns to it. Settings has three tabs:
 
-| Control | Action |
+- **Controls:** two keys per action, click one and press the new key.
+  Backspace clears a key, Esc cancels. Saved to `user://settings.cfg`.
+- **Brain interface:** play with a g.tec Unicorn headset (see below).
+- **Audio & display:** music volume and fullscreen.
+
+## Brain interface (three signals)
+
+The game can be played hands-free with a headset that detects three things:
+a **blink**, a **closed mouth** and **closed eyes**. The `BrainLink` autoload
+(`scripts/brain_link.gd`) turns them into steering:
+
+| Signal | Default action |
 | --- | --- |
-| WASD or arrow keys | Walk, including diagonals |
-| Hold Shift | Run |
-| R | Return to the door you entered the room by |
-| Esc | Close the demo |
+| Close mouth | Go / stop: walk along the heading, or stop |
+| Blink | Turn the heading clockwise (up, right, down, left) |
+| Eyes closed | Run on / off |
+
+An arrow at the player's feet shows the heading: faint while standing,
+bright while walking, doubled while running. Each signal can be remapped in
+Settings to Turn, Go / stop, Run, Back to door or Nothing. In menus a blink
+moves to the next button and a closed mouth presses it, so the whole game,
+menus included, works without a keyboard.
+
+The detector can deliver signals in either of two ways, whichever is easier:
+
+- **UDP:** send the word (BLINK, MOUTH or EYES by default, editable) as a
+  short text message to the game's port (default 1000). For example,
+  Unicorn Speller's network output, or a few lines in any language.
+- **Keys:** send a key press (B, M or E by default, rebindable). The same
+  keys also let you try the controls on a keyboard.
+
+Setup: Settings > Brain interface > tick **Use the brain interface**. The
+status line shows "Listening on UDP port 1000" and the last signal received.
+Each signal has a **Test** button. Without the headset you can also run
+`python tools/send_brain_command.py BLINK`. **Ignore repeats** (default
+0.4 s) makes a signal reported twice in quick succession count once.
+
+The dungeon's start room never has a room directly below it, since you
+arrive there from below.
 
 ## How the procedural rooms work
 
@@ -43,8 +120,8 @@ Add a room design by appending a template to `LAYOUTS`. The generator handles
 mirroring, door clearance and reachability. Set `dungeon_seed` on the
 `VioletKeep` node to replay a specific dungeon (0 = random each run).
 
-`scripts/tutorial.gd` extends `room.gd` with the prologue's lessons and the
-mage's curse scene. `scripts/room.gd` turns the current room into walls, door triggers, blocks and
+`scripts/tutorial.gd` extends `room.gd` with the round chamber (a ring wall
+with curved collision), the lessons and the mage's curse scene. `scripts/room.gd` turns the current room into walls, door triggers, blocks and
 drawing, and runs the HUD and minimap. `scripts/knight.gd` handles movement
 and animation.
 
@@ -69,6 +146,9 @@ the prologue (lessons, curse, door):
 ```powershell
 godot --headless --path . --script res://tests/room_smoke.gd
 godot --headless --path . --script res://tests/tutorial_smoke.gd
+godot --headless --path . --script res://tests/floors_smoke.gd
+godot --headless --path . --script res://tests/menu_smoke.gd
+godot --headless --path . --script res://tests/items_smoke.gd
 godot --headless --path . --script res://tests/door_regression.gd
 ```
 

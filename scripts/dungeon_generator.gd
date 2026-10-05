@@ -11,6 +11,9 @@ const ROWS := 22
 ## Keeps the floor plan compact enough for the minimap.
 const MAX_X := 4
 const MAX_Y := 3
+## You arrive in the start room from below (the stairs or the round
+## chamber), so no room is ever placed directly south of it.
+const BELOW_START := Vector2i(0, 1)
 const LOOP_CHANCE := 0.15
 const TILED_FLOOR_CHANCE := 0.3
 const ITEMS: Array[String] = ["sword", "potion", "bubble"]
@@ -221,8 +224,8 @@ class Room:
 	var layout := ""
 	## Interior cells holding a stone block.
 	var blocks: Array[Vector2i] = []
-	## Decorations stand against the north wall.
-	var ornaments: Array[Vector2i] = []
+	## Interior columns with an extra torch on the north wall.
+	var torches: Array[int] = []
 	var tiled_floor := false
 	var item := ""
 	var seen := false
@@ -238,19 +241,38 @@ static func opposite(direction: int) -> int:
 
 
 ## Returns {Vector2i cell: Room}. The same seed always yields the same floor.
-func generate(seed_value: int, room_count: int) -> Dictionary:
+## `min_exit_distance` is the fewest doors between the start and the stairs.
+func generate(seed_value: int, room_count: int, min_exit_distance := 0) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	room_count = clampi(room_count, 4, (MAX_X * 2 + 1) * (MAX_Y * 2 + 1) / 2)
 	var rooms := {}
-	for attempt in range(100):
+	for attempt in range(400):
 		rooms = grow_plan(rng, room_count)
-		if rooms.size() == room_count and assign_kinds(rng, rooms):
+		if rooms.size() != room_count or not assign_kinds(rng, rooms):
+			continue
+		add_loops(rng, rooms)
+		if exit_distance(rooms) >= min_exit_distance:
 			break
-	add_loops(rng, rooms)
 	for room: Room in rooms.values():
 		build_interior(rng, room)
 	return rooms
+
+
+## Doors to walk through from the start room to the stairs (-1 if none).
+static func exit_distance(rooms: Dictionary) -> int:
+	var distance := {Vector2i.ZERO: 0}
+	var queue: Array[Vector2i] = [Vector2i.ZERO]
+	while not queue.is_empty():
+		var cell: Vector2i = queue.pop_front()
+		if rooms[cell].kind == "exit":
+			return distance[cell]
+		for direction in range(4):
+			var next: Vector2i = cell + OFFSETS[direction]
+			if rooms[cell].doors[direction] and not distance.has(next):
+				distance[next] = distance[cell] + 1
+				queue.append(next)
+	return -1
 
 
 ## Isaac-style growth: a new room may touch only the room it grows from,
@@ -266,7 +288,7 @@ func grow_plan(rng: RandomNumberGenerator, room_count: int) -> Dictionary:
 		var from: Vector2i = order[rng.randi() % order.size()]
 		var direction := rng.randi() % 4
 		var cell := from + OFFSETS[direction]
-		if rooms.has(cell) or absi(cell.x) > MAX_X or absi(cell.y) > MAX_Y:
+		if rooms.has(cell) or cell == BELOW_START or absi(cell.x) > MAX_X or absi(cell.y) > MAX_Y:
 			continue
 		if neighbour_count(rooms, cell) > 1:
 			continue
@@ -331,24 +353,18 @@ func build_interior(rng: RandomNumberGenerator, room: Room) -> void:
 		if is_traversable(blocked, room):
 			room.layout = template.name
 			room.blocks.assign(blocked.keys())
-			place_ornaments(rng, room, blocked)
+			place_torches(rng, room)
 			return
 	room.layout = "Empty Hall"
 
 
-func place_ornaments(rng: RandomNumberGenerator, room: Room, blocked: Dictionary) -> void:
-	var count := 2 if room.kind != "normal" else rng.randi_range(0, 2)
-	for attempt in range(8):
-		if room.ornaments.size() >= count:
-			return
-		var cell := Vector2i(rng.randi_range(0, COLS - 1), 0)
-		if blocked.has(cell) or cell in required_floor(room):
-			continue
-		blocked[cell] = true
-		if is_traversable(blocked, room):
-			room.ornaments.append(cell)
-		else:
-			blocked.erase(cell)
+## Torches hang on the wall, so they never block the floor. Columns 3-4 and
+## 15-16 already carry the room's fixed pair, and 9-10 are the north door.
+func place_torches(rng: RandomNumberGenerator, room: Room) -> void:
+	var free_columns: Array[int] = [0, 1, 6, 7, 12, 13, 18, 19]
+	for index in range(rng.randi_range(0, 2)):
+		var column: int = free_columns.pop_at(rng.randi() % free_columns.size())
+		room.torches.append(column)
 
 
 func scatter_layout(rng: RandomNumberGenerator) -> Dictionary:

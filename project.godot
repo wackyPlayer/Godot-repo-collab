@@ -15,8 +15,14 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="Caballerito · The Violet Keep"
-run/main_scene="res://scenes/tutorial.tscn"
+run/main_scene="res://scenes/main_menu.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[autoload]
+
+Settings="*res://scripts/settings.gd"
+BrainLink="*res://scripts/brain_link.gd"
+Music="*res://scripts/music.gd"
 
 [display]
 

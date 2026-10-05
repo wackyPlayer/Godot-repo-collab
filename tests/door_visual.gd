@@ -7,6 +7,8 @@ const NAMES := ["north", "east", "south", "west"]
 var failures := 0
 
 func _initialize() -> void:
+	# Default keys, whatever the player has rebound.
+	root.get_node("Settings").use_defaults()
 	call_deferred("capture")
 
 func capture() -> void:
